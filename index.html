@@ -15,16 +15,16 @@
 
 <!-- ══ NAV ══ -->
 <nav id="main-nav">
-  <div class="nav-brand serif" onclick="window.navigate('home');window.closeMobileDrawer()">
+  <div class="nav-brand serif" onclick="window.goToView('home');window.closeMobileDrawer()">
     MediaNest <span>· collect everything</span>
   </div>
 
   <!-- Desktop nav links -->
   <div class="nav-links">
-    <button class="nav-btn active" id="nb-home"       onclick="window.navigate('home')">Home</button>
-    <button class="nav-btn"        id="nb-collection"  onclick="window.navigate('collection')" style="display:none">Collection</button>
-    <button class="nav-btn"        id="nb-discover"    onclick="window.navigate('discover')">Discover</button>
-    <button class="nav-btn"        id="nb-trade"       onclick="window.navigate('trade')" style="display:none">Trading</button>
+    <button class="nav-btn active" id="nb-home"       onclick="window.goToView('home')">Home</button>
+    <button class="nav-btn"        id="nb-collection"  onclick="window.goToView('collection')" style="display:none">Collection</button>
+    <button class="nav-btn"        id="nb-discover"    onclick="window.goToView('discover')">Discover</button>
+    <button class="nav-btn"        id="nb-trade"       onclick="window.goToView('trade')" style="display:none">Trading</button>
   </div>
 
   <!-- Desktop actions -->
@@ -35,11 +35,11 @@
       </div>
     </button>
     <button class="btn-icon" id="nav-add" onclick="window.openAddModal()" title="Add item" style="display:none">＋</button>
-    <button class="btn-primary" id="nav-login-desktop" onclick="window.navigate('login')">Sign in</button>
+    <button class="btn-primary" id="nav-login-desktop" onclick="window.goToView('login')">Sign in</button>
     <div class="flex items-center gap-2" id="nav-user" style="display:none">
       <div class="avatar" id="nav-avatar"
            style="width:34px;height:34px;font-size:14px;cursor:pointer"
-           onclick="window.navigate('profile')">?</div>
+           onclick="window.goToView('profile')">?</div>
       <button class="btn-ghost" onclick="window.logout()">Sign out</button>
     </div>
     <button class="hamburger" id="hamburger" onclick="window.toggleMobileDrawer()" aria-label="Menu">
@@ -50,10 +50,10 @@
 
 <!-- ══ MOBILE DRAWER ══ -->
 <div class="mobile-drawer" id="mobile-drawer">
-  <button class="nav-btn" id="mbnb-home"       onclick="window.navigate('home');window.closeMobileDrawer()">🏠 Home</button>
-  <button class="nav-btn" id="mbnb-collection" onclick="window.navigate('collection');window.closeMobileDrawer()" style="display:none">📦 Collection</button>
-  <button class="nav-btn"                       onclick="window.navigate('discover');window.closeMobileDrawer()">🔍 Discover</button>
-  <button class="nav-btn" id="mbnb-trade"       onclick="window.navigate('trade');window.closeMobileDrawer()" style="display:none">💬 Trading</button>
+  <button class="nav-btn" id="mbnb-home"       onclick="window.goToView('home');window.closeMobileDrawer()">🏠 Home</button>
+  <button class="nav-btn" id="mbnb-collection" onclick="window.goToView('collection');window.closeMobileDrawer()" style="display:none">📦 Collection</button>
+  <button class="nav-btn"                       onclick="window.goToView('discover');window.closeMobileDrawer()">🔍 Discover</button>
+  <button class="nav-btn" id="mbnb-trade"       onclick="window.goToView('trade');window.closeMobileDrawer()" style="display:none">💬 Trading</button>
   <div class="mobile-drawer-divider"></div>
   <div class="mobile-drawer-bottom">
     <div class="theme-grid" id="mobile-theme-picker"></div>
@@ -61,11 +61,11 @@
             onclick="window.openAddModal();window.closeMobileDrawer()"
             style="display:none;padding:12px;text-align:center;margin-top:8px">＋ Add item</button>
     <button class="btn-primary w-full" id="mob-login"
-            onclick="window.navigate('login');window.closeMobileDrawer()"
+            onclick="window.goToView('login');window.closeMobileDrawer()"
             style="padding:12px;text-align:center;margin-top:8px">Sign in</button>
     <div id="mob-user" style="display:none">
       <button class="btn-ghost w-full"
-              onclick="window.navigate('profile');window.closeMobileDrawer()"
+              onclick="window.goToView('profile');window.closeMobileDrawer()"
               style="text-align:center;padding:10px;margin-bottom:8px">👤 Profile</button>
       <button class="btn-danger w-full"
               onclick="window.logout();window.closeMobileDrawer()"
@@ -88,8 +88,8 @@
     <h1 class="hero-title">Catalog <em>everything</em><br>you own &amp; love</h1>
     <p class="hero-sub">Books, comics, CDs, vinyl, newspapers, games — scan a barcode or photograph a book cover and we'll fill in the details automatically.</p>
     <div class="hero-actions">
-      <button class="btn-primary" onclick="window.navigate('signup')" style="font-size:15px;padding:10px 28px">Start collecting free</button>
-      <button class="btn-ghost"   onclick="window.navigate('discover')" style="font-size:15px;padding:10px 22px">Browse collections</button>
+      <button class="btn-primary" onclick="window.goToView('signup')" style="font-size:15px;padding:10px 28px">Start collecting free</button>
+      <button class="btn-ghost"   onclick="window.goToView('discover')" style="font-size:15px;padding:10px 22px">Browse collections</button>
     </div>
   </div>
   <div class="container section">
@@ -138,7 +138,7 @@
         </div>
         <button class="btn-primary w-full" id="login-btn" style="padding:11px;font-size:14px" onclick="window.doLogin()">Sign in</button>
         <div style="text-align:center;font-size:12px;color:var(--text2)">
-          No account? <a onclick="window.navigate('signup')" style="color:var(--accent);cursor:pointer">Create one</a>
+          No account? <a onclick="window.goToView('signup')" style="color:var(--accent);cursor:pointer">Create one</a>
         </div>
       </div>
     </div>
@@ -166,7 +166,7 @@
         <div class="form-error" id="su-err"></div>
         <button class="btn-primary w-full" id="signup-btn" style="padding:11px;font-size:14px" onclick="window.doSignup()">Create account</button>
         <div style="text-align:center;font-size:12px;color:var(--text2)">
-          Have an account? <a onclick="window.navigate('login')" style="color:var(--accent);cursor:pointer">Sign in</a>
+          Have an account? <a onclick="window.goToView('login')" style="color:var(--accent);cursor:pointer">Sign in</a>
         </div>
       </div>
     </div>
@@ -462,7 +462,7 @@
   Firebase is loaded first as a module so window._fb and window._fbReady
   are set before main.js boots. main.js waits for _fbReady via callback.
 -->
-<script type="module" src="./js/firebase.js"></script>
-<script type="module" src="./js/main.js"></script>
+<script type="module" src="./firebase.js"></script>
+<script type="module" src="./main.js"></script>
 </body>
 </html>

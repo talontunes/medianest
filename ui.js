@@ -45,7 +45,7 @@ export function navigate(page) {
 
   window.scrollTo(0, 0);
 }
-window.navigate = navigate;
+window.goToView = navigate;
 
 // ── Mobile drawer ─────────────────────────────────────────────
 export function toggleMobileDrawer() {
