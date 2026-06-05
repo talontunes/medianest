@@ -3,29 +3,27 @@
 // Firebase initialisation. Loaded as a <script type="module">
 // BEFORE main.js so that window._fb and window._fbReady are set
 // before the app boots.
-//
-// HOW TO CONFIGURE:
-//  1. Go to https://console.firebase.google.com
-//  2. Create a project → Add a Web App → copy the config object
-//  3. Enable Authentication → Email/Password sign-in method
-//  4. Enable Firestore Database (start in test mode)
-//  5. Replace the placeholder values in FIREBASE_CONFIG below
 // ─────────────────────────────────────────────────────────────
 
 const FIREBASE_CONFIG = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT.firebaseapp.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:             "YOUR_APP_ID",
+  apiKey:            "AIzaSyBLla3uTvBOTnHskT_4IuAY33MAjBFei7k",
+  authDomain:        "medianest-cf71b.firebaseapp.com",
+  projectId:         "medianest-cf71b",
+  storageBucket:     "medianest-cf71b.firebasestorage.app",
+  messagingSenderId: "117838127157",
+  appId:             "1:117838127157:web:f528a1eefcec0ca116517c",
+  measurementId:     "G-LP4CXC2KYW",
 };
 
 // Guard: only initialise when real config values are present
+// FIX: the old guard checked for placeholder strings — now checks
+// that apiKey doesn't start with "YOUR_" and has meaningful length.
 const FIREBASE_ENABLED =
-  FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY" &&
-  FIREBASE_CONFIG.projectId !== "YOUR_PROJECT_ID" &&
-  FIREBASE_CONFIG.apiKey.length > 10;
+  !!FIREBASE_CONFIG.apiKey &&
+  !FIREBASE_CONFIG.apiKey.startsWith("YOUR_") &&
+  FIREBASE_CONFIG.apiKey.length > 10 &&
+  !!FIREBASE_CONFIG.projectId &&
+  !FIREBASE_CONFIG.projectId.startsWith("YOUR_");
 
 function signalReady() {
   window._fbReady = true;
@@ -34,8 +32,10 @@ function signalReady() {
 
 if (!FIREBASE_ENABLED) {
   // No config — signal immediately so main.js boots in local mode
+  console.log('[firebase] No valid config — running in local mode');
   signalReady();
 } else {
+  console.log('[firebase] Real config detected — initialising Firebase…');
   (async () => {
     try {
       const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
@@ -68,7 +68,8 @@ if (!FIREBASE_ENABLED) {
               lastName:  prof.lastName  || firebaseUser.displayName?.split(" ").slice(1).join(" ") || "",
               joined:    prof.joined    || new Date().toISOString().split("T")[0],
             };
-          } catch {
+          } catch (profileErr) {
+            console.warn('[firebase] Could not load profile:', profileErr);
             window._state.user = {
               id: firebaseUser.uid, email: firebaseUser.email,
               username: firebaseUser.email.split("@")[0],
@@ -165,7 +166,7 @@ if (!FIREBASE_ENABLED) {
       };
 
     } catch (err) {
-      console.error("Firebase failed to initialise:", err);
+      console.error("[firebase] Failed to initialise:", err);
       // Fall through to local mode
     }
 

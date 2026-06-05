@@ -108,7 +108,7 @@ function _startContinuousZXingScan() {
     canvas.getContext('2d').drawImage(video, 0, 0);
 
     try {
-      // FIX: use decodeFromCanvas — the correct synchronous API in ZXing 0.19.x
+      // decodeFromCanvas throws NotFoundException when no barcode found — that's normal.
       const result = codeReader.decodeFromCanvas(canvas);
       if (result) {
         const code = result.getText();
@@ -123,12 +123,12 @@ function _startContinuousZXingScan() {
            <br><span style="color:var(--text2);font-size:12px;display:block;margin-top:4px">Looking up item details…</span>`
         );
         toast('Barcode read: ' + code, 'success');
-        // FIX: call the directly-imported lookupBarcode, not window.lookupBarcode
-        // (window version may not be set yet when this closure first forms)
         lookupBarcode(code);
         return;
       }
-    } catch (_) { /* no barcode in this frame — keep scanning */ }
+    } catch (_) {
+      // NotFoundException on every frame without a barcode — expected, keep scanning.
+    }
 
     if (_cameraScanning) setTimeout(tick, 200);
   };
@@ -173,7 +173,7 @@ async function _runZXingOnDataUrl(dataUrl) {
   }
 
   try {
-    // Load image into an HTMLImageElement first
+    // Load image into an HTMLImageElement first (required by ZXing APIs)
     const image = new Image();
     await new Promise((res, rej) => {
       image.onload  = res;
@@ -191,13 +191,20 @@ async function _runZXingOnDataUrl(dataUrl) {
     let code;
 
     try {
-      // Primary: synchronous canvas decode (fastest, most compatible with ZXing 0.19.x)
+      // Primary path: synchronous canvas decode — fastest in ZXing 0.19.x
       const result = codeReader.decodeFromCanvas(canvas);
       code = result.getText();
-    } catch (_) {
-      // Fallback: async decode from data URL
-      const result = await codeReader.decodeFromImage(undefined, dataUrl);
-      code = result.getText();
+    } catch (_canvasErr) {
+      // FIX: The old fallback passed `decodeFromImage(undefined, dataUrl)` which is
+      // wrong — the first arg must be an HTMLImageElement, second arg is optional hints.
+      // Correct usage: pass the already-loaded image element directly.
+      try {
+        const result = await codeReader.decodeFromImage(image);
+        code = result.getText();
+      } catch (_imgErr) {
+        // Both paths failed — no barcode detected in this image.
+        throw new Error('No barcode found');
+      }
     }
 
     const manualEl = document.getElementById('barcode-manual');
@@ -242,11 +249,9 @@ export function processCoverScanFile(file) {
   const reader = new FileReader();
   reader.onload = ev => {
     const img = document.getElementById('cover-scan-preview');
-    if (img) { 
-      img.src = ev.target.result; 
-      img.style.display = ''; 
-      
-      // Wait for image layout to render before passing data to OCR to avoid race conditions
+    if (img) {
+      img.src = ev.target.result;
+      img.style.display = '';
       img.onload = () => {
         if (_state.editingItem) _state.editingItem._coverData = ev.target.result;
         showCoverScanStatus('loading', '<span class="spin">⏳</span> Extracting text from cover image…');
@@ -268,7 +273,11 @@ async function _extractTextFromCoverImage(dataUrl) {
       showCoverScanStatus('loading', '<span class="spin">⏳</span> Loading OCR engine…');
       await new Promise((res, rej) => {
         const s   = document.createElement('script');
-        s.src     = 'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js';
+        // FIX: pin to a stable Tesseract.js v4 CDN URL.
+        // v5 changed the createWorker() signature — the OEM integer
+        // second argument was removed and options moved to a single object.
+        // v4 keeps the stable (lang, oem, options) signature used below.
+        s.src     = 'https://unpkg.com/tesseract.js@4/dist/tesseract.min.js';
         s.onload  = res;
         s.onerror = rej;
         document.head.appendChild(s);
@@ -277,6 +286,8 @@ async function _extractTextFromCoverImage(dataUrl) {
 
     showCoverScanStatus('loading', '<span class="spin">⏳</span> Running OCR… (this may take a moment)');
 
+    // FIX: Tesseract.js v4 API — createWorker(lang, oem, options)
+    // OEM 1 = LSTM_ONLY (most accurate for printed text)
     const worker = await Tesseract.createWorker('eng', 1, {
       logger: m => {
         if (m.status === 'recognizing text') {
@@ -303,15 +314,19 @@ async function _extractTextFromCoverImage(dataUrl) {
       return;
     }
 
-    const candidate   = lines[0];
-    const titleInput  = document.getElementById('cover-title-input');
+    // Use the longest line from the top 3 — cover titles are often the biggest text
+    // and OCR picks them up as long lines, avoiding short noise words.
+    const candidate = lines
+      .slice(0, 3)
+      .sort((a, b) => b.length - a.length)[0];
+
+    const titleInput = document.getElementById('cover-title-input');
     if (titleInput) titleInput.value = candidate;
 
     showCoverScanStatus('matched',
       `<strong>✓ Text detected:</strong> "${candidate}"
        <br><span style="font-size:12px;color:var(--text2);display:block;margin-top:4px">Searching Open Library…</span>`
     );
-    // FIX: call directly-imported searchBookByTitle
     searchBookByTitle(candidate);
 
   } catch (ocrErr) {
@@ -340,8 +355,8 @@ export function showCoverScanStatus(type, html) {
   el.innerHTML = `<div class="scan-status-box ${type}">${html}</div>`;
 }
 
-// ── Bind functions to Window Global Scope so index.html can call them ──
-window.handleScanDrop = handleScanDrop;
-window.handleScanFile = handleScanFile;
+// ── Bind to global scope for index.html inline handlers ───────
+window.handleScanDrop      = handleScanDrop;
+window.handleScanFile      = handleScanFile;
 window.handleCoverScanDrop = handleCoverScanDrop;
 window.handleCoverScanFile = handleCoverScanFile;

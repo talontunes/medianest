@@ -19,31 +19,33 @@ function setAuthLoading(btnId, loading, label = '') {
 
 function showLoginError(msg) {
   const el = document.getElementById('login-err');
+  if (!el) return;
   el.textContent = msg;
   el.classList.add('show');
 }
 
 function showSignupError(msg) {
   const el = document.getElementById('su-err');
+  if (!el) return;
   el.textContent = msg;
   el.classList.add('show');
 }
 
 // Maps Firebase error codes → user-friendly strings
 const FB_LOGIN_ERRORS = {
-  'auth/invalid-credential':      'Invalid email or password.',
-  'auth/user-not-found':          'No account found with that email.',
-  'auth/wrong-password':          'Incorrect password. Try again.',
-  'auth/invalid-email':           'Please enter a valid email address.',
-  'auth/too-many-requests':       'Too many attempts. Please wait a moment and try again.',
-  'auth/user-disabled':           'This account has been disabled.',
-  'auth/network-request-failed':  'Network error — check your connection.',
+  'auth/invalid-credential':     'Invalid email or password.',
+  'auth/user-not-found':         'No account found with that email.',
+  'auth/wrong-password':         'Incorrect password. Try again.',
+  'auth/invalid-email':          'Please enter a valid email address.',
+  'auth/too-many-requests':      'Too many attempts. Please wait a moment and try again.',
+  'auth/user-disabled':          'This account has been disabled.',
+  'auth/network-request-failed': 'Network error — check your connection.',
 };
 const FB_SIGNUP_ERRORS = {
-  'auth/email-already-in-use':    'That email is already registered. Try signing in.',
-  'auth/weak-password':           'Password is too weak — use at least 8 characters.',
-  'auth/invalid-email':           'Please enter a valid email address.',
-  'auth/network-request-failed':  'Network error — check your connection.',
+  'auth/email-already-in-use':   'That email is already registered. Try signing in.',
+  'auth/weak-password':          'Password is too weak — use at least 8 characters.',
+  'auth/invalid-email':          'Please enter a valid email address.',
+  'auth/network-request-failed': 'Network error — check your connection.',
 };
 
 // ── Login ─────────────────────────────────────────────────────
@@ -60,7 +62,10 @@ export async function doLogin() {
   if (window._fb?.enabled) {
     try {
       await window._fb.login(email, pw);
-      // onAuthStateChanged in firebase.js handles navigation
+      // FIX: On success, onAuthStateChanged in firebase.js handles navigation.
+      // We must still reset the button here — otherwise it stays in "Please wait…"
+      // state if the user ever returns to the login page (e.g. after sign-out).
+      setAuthLoading('login-btn', false, 'Sign in');
     } catch (e) {
       showLoginError(FB_LOGIN_ERRORS[e.code] || e.message || 'Sign-in failed. Please try again.');
       setAuthLoading('login-btn', false, 'Sign in');
@@ -104,6 +109,8 @@ export async function doSignup() {
   if (window._fb?.enabled) {
     try {
       await window._fb.signup(email, pw, first, last, uname);
+      // FIX: reset button on success (navigation handled by onAuthStateChanged)
+      setAuthLoading('signup-btn', false, 'Create account');
       toast('Welcome, ' + first + '! Your collection is ready.', 'success');
     } catch (e) {
       showSignupError(FB_SIGNUP_ERRORS[e.code] || e.message || 'Sign-up failed. Please try again.');
@@ -146,6 +153,7 @@ export async function logout() {
   stopCamera();
   if (window._fb?.enabled) {
     await window._fb.logout();
+    // onAuthStateChanged handles clearing state and navigating home
     return;
   }
   _state.user = null;
