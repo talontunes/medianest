@@ -1,63 +1,62 @@
 // js/forms.js
 // ─────────────────────────────────────────────────────────────
-// Manual entry form builder — standard fields + comic specialist form
+// Manual-entry form builder for the Add Item modal.
+// Handles all media types including the comic book specialised UI.
+// Also owns the _comicTagSelected mutable state object.
 // ─────────────────────────────────────────────────────────────
 
-import { _state, FIELD_LABELS, COMIC_SPECIAL, CONDITION_OPTIONS, BINDING_OPTIONS } from './state.js';
+import { _state, MEDIA_TYPES, COMIC_SPECIAL, CONDITION_OPTIONS, BINDING_OPTIONS } from './state.js';
 
-// Comic tag selection state (reset on each openAddModal call)
-export let _comicTagSelected = {};
-export function resetComicTags() { _comicTagSelected = {}; }
+// ── Comic tag selection state ─────────────────────────────────
+// Exported as a plain object so mutations are visible to importers.
+export const _comicTagSelected = {};
 
-// ── Main form builder ─────────────────────────────────────────
+export function resetComicTags() {
+  // Clear all own properties without replacing the reference
+  // (importers hold a reference to this exact object)
+  for (const key of Object.keys(_comicTagSelected)) {
+    delete _comicTagSelected[key];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MANUAL FORM BUILDER
+// ═══════════════════════════════════════════════════════════════
+
 export function buildManualForm() {
   const mt   = _state.selectedType;
-  if (!mt) return;
   const wrap = document.getElementById('manual-form-fields');
+  if (!mt || !wrap) return;
   wrap.innerHTML = '';
 
-  // Cover image row (always shown)
+  // Cover image picker (all types)
   wrap.innerHTML += `
     <div class="form-group">
       <label class="form-label">Cover image (optional)</label>
       <div style="display:flex;gap:10px;align-items:center">
-        <div id="cover-preview" style="width:48px;height:64px;background:var(--bg3);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:22px;overflow:hidden;border:1px solid var(--border)">${mt.icon}</div>
+        <div id="cover-preview"
+             style="width:48px;height:64px;background:var(--bg3);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:22px;overflow:hidden;border:1px solid var(--border)">
+          ${mt.icon}
+        </div>
         <button class="btn-ghost" onclick="document.getElementById('cover-file').click()" type="button">Upload cover</button>
         <input type="file" id="cover-file" accept="image/*" style="display:none" onchange="window.previewCover(event)">
       </div>
     </div>`;
 
-  if (mt.isComic) { _buildComicForm(wrap); return; }
+  if (mt.isComic) {
+    _buildComicForm(wrap);
+    return;
+  }
 
   // Generic fields
   mt.fields.forEach(f => {
-    const label = FIELD_LABELS[f] || f;
+    const label = _fieldLabel(f);
     if (f === 'condition') {
-      wrap.innerHTML += `
-        <div class="form-group">
-          <label class="form-label">${label}</label>
-          <select class="form-select" data-field="${f}">
-            <option value="">— Select —</option>
-            ${CONDITION_OPTIONS.map(o => `<option>${o}</option>`).join('')}
-          </select>
-        </div>`;
+      wrap.innerHTML += _selectField(f, label, CONDITION_OPTIONS);
     } else if (f === 'binding') {
-      wrap.innerHTML += `
-        <div class="form-group">
-          <label class="form-label">${label}</label>
-          <select class="form-select" data-field="${f}">
-            <option value="">— Select —</option>
-            ${BINDING_OPTIONS.map(o => `<option>${o}</option>`).join('')}
-          </select>
-        </div>`;
+      wrap.innerHTML += _selectField(f, label, BINDING_OPTIONS);
     } else if (f === 'complete') {
-      wrap.innerHTML += `
-        <div class="form-group">
-          <label class="form-label">${label}</label>
-          <select class="form-select" data-field="${f}">
-            <option>No</option><option>Yes</option>
-          </select>
-        </div>`;
+      wrap.innerHTML += _selectField(f, label, ['No', 'Yes']);
     } else if (f === 'notes' || f === 'description') {
       wrap.innerHTML += `
         <div class="form-group">
@@ -74,7 +73,7 @@ export function buildManualForm() {
   });
 }
 
-// ── Comic specialist form ─────────────────────────────────────
+// ── Comic-specific form ───────────────────────────────────────
 function _buildComicForm(wrap) {
   wrap.innerHTML += `
     <div class="form-row">
@@ -112,10 +111,7 @@ function _buildComicForm(wrap) {
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Condition (raw)</label>
-        <select class="form-select" data-field="condition">
-          <option value="">— Select —</option>
-          ${CONDITION_OPTIONS.map(o => `<option>${o}</option>`).join('')}
-        </select>
+        ${_selectFieldHtml('condition', CONDITION_OPTIONS)}
       </div>
       <div class="form-group"><label class="form-label">Printing</label><input class="form-input" data-field="printing" placeholder="1st printing"></div>
     </div>
@@ -123,7 +119,7 @@ function _buildComicForm(wrap) {
       <label class="form-label">Professional Grade</label>
       <div class="comic-tags-wrap">
         ${COMIC_SPECIAL.grade.map(v =>
-          `<div class="comic-tag" data-field="grade" data-val="${v}" onclick="window.toggleComicTag(this, 'grade')">${v}</div>`
+          `<div class="comic-tag" data-field="grade" data-val="${v}" onclick="window.toggleComicTag(this,'grade')">${v}</div>`
         ).join('')}
       </div>
     </div>
@@ -137,13 +133,13 @@ function _buildComicForm(wrap) {
       </div>
       <div class="form-group">
         <label class="form-label">Newsstand Copy?</label>
-        <select class="form-select" data-field="newsstand"><option>No</option><option>Yes</option></select>
+        ${_selectFieldHtml('newsstand', ['No', 'Yes'])}
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Signed?</label>
-        <select class="form-select" data-field="signed"><option>No</option><option>Yes</option></select>
+        ${_selectFieldHtml('signed', ['No', 'Yes'])}
       </div>
       <div class="form-group"><label class="form-label">Stamp / Sticker</label><input class="form-input" data-field="stamp" placeholder="Convention stamp…"></div>
     </div>
@@ -164,9 +160,9 @@ export function toggleComicTag(el, group) {
     el.classList.add('active');
     _comicTagSelected[field] = val;
   } else {
-    // Everything else is multi-select
+    // Others are multi-select
     el.classList.toggle('active');
-    if (!_comicTagSelected[field]) _comicTagSelected[field] = [];
+    if (!Array.isArray(_comicTagSelected[field])) _comicTagSelected[field] = [];
     const arr = _comicTagSelected[field];
     const idx = arr.indexOf(val);
     if (idx > -1) arr.splice(idx, 1); else arr.push(val);
@@ -174,7 +170,7 @@ export function toggleComicTag(el, group) {
 }
 window.toggleComicTag = toggleComicTag;
 
-// ── Cover image preview ───────────────────────────────────────
+// ── Cover image preview (called from inline onchange) ─────────
 export function previewCover(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -187,3 +183,33 @@ export function previewCover(e) {
   reader.readAsDataURL(file);
 }
 window.previewCover = previewCover;
+
+// ── Internal helpers ──────────────────────────────────────────
+function _fieldLabel(f) {
+  const LABELS = {
+    title:'Title', artist:'Artist / Band', author:'Author', album:'Album', year:'Year',
+    pub_year:'Year', pub_date:'Publication Date', issue_date:'Issue Date', publisher:'Publisher',
+    label:'Label', catalog:'Catalog #', pressing:'Pressing / Country', speed:'Speed (RPM)',
+    condition:'Condition', format:'Format', notes:'Notes', isbn:'ISBN', edition:'Edition',
+    binding:'Binding', genre:'Genre', language:'Language', issue:'Issue #',
+    cover_artist:'Cover Artist', writer:'Writer', penciler:'Penciler', inker:'Inker',
+    colorist:'Colorist', variant:'Variant', print_run:'Print Run', edition_type:'Edition Type',
+    grade:'Grade', grader:'Graded By', newsstand:'Newsstand?', printing:'Printing #',
+    signed:'Signed?', stamp:'Stamp / Sticker', headline:'Headline', volume:'Volume #',
+    platform:'Platform', region:'Region', disc_count:'Disc Count', complete:'Complete in Box?',
+    studio:'Studio', subject:'Subject', photographer:'Photographer', size:'Size / Dimensions',
+    medium:'Medium', creator:'Creator', type:'Type / Category', pages:'Pages', description:'Description',
+  };
+  return LABELS[f] || f;
+}
+
+function _selectFieldHtml(field, options) {
+  return `<select class="form-select" data-field="${field}">
+    <option value="">— Select —</option>
+    ${options.map(o => `<option>${o}</option>`).join('')}
+  </select>`;
+}
+
+function _selectField(field, label, options) {
+  return `<div class="form-group"><label class="form-label">${label}</label>${_selectFieldHtml(field, options)}</div>`;
+}

@@ -6,9 +6,12 @@
 
 import { _state, MEDIA_TYPES } from './state.js';
 import { saveState } from './storage.js';
-import { stopCamera } from './scanner.js';
-import { buildManualForm, resetComicTags } from './forms.js';
 import { buildThemePickers } from './theme.js';
+import { buildManualForm, resetComicTags } from './forms.js';
+
+// FIX: stopCamera is imported lazily inside navigate() to avoid a
+// circular dependency (scanner.js → lookup.js → ui.js → scanner.js).
+// Do NOT import stopCamera at the top level here.
 
 const PAGES = ['home', 'login', 'signup', 'collection', 'discover', 'trade', 'profile'];
 
@@ -20,7 +23,10 @@ let _currentPage = 'home';
 window._currentPage = _currentPage;
 
 export function navigate(page) {
-  if (page !== _currentPage && _cameraStream) stopCamera();
+  // Stop camera when leaving the add-modal's scan tab
+  if (page !== _currentPage) {
+    import('./scanner.js').then(s => s.stopCamera()).catch(() => {});
+  }
 
   PAGES.forEach(p => {
     document.getElementById('page-' + p)?.classList.toggle('active', p === page);
@@ -31,7 +37,8 @@ export function navigate(page) {
   _currentPage = page;
   window._currentPage = page;
 
-  if (page === 'collection') { import('./collection.js').then(m => m.renderCollection()); }
+  // Use already-loaded module references (main.js puts them on window)
+  if (page === 'collection') window.renderCollection?.();
   if (page === 'discover')   renderDiscover();
   if (page === 'trade')      renderTrade();
   if (page === 'profile')    renderProfile();
@@ -44,9 +51,8 @@ window.navigate = navigate;
 export function toggleMobileDrawer() {
   const drawer = document.getElementById('mobile-drawer');
   const ham    = document.getElementById('hamburger');
-  const isOpen = drawer.classList.contains('open');
-  drawer.classList.toggle('open', !isOpen);
-  ham.classList.toggle('open', !isOpen);
+  drawer.classList.toggle('open');
+  ham.classList.toggle('open', drawer.classList.contains('open'));
 }
 export function closeMobileDrawer() {
   document.getElementById('mobile-drawer').classList.remove('open');
@@ -59,10 +65,13 @@ window.closeMobileDrawer  = closeMobileDrawer;
 // MODALS
 // ═══════════════════════════════════════════════════════════════
 
-export function openModal(id)  { document.getElementById(id).classList.add('open');    }
+export function openModal(id)  { document.getElementById(id)?.classList.add('open');    }
 export function closeModal(id) {
-  document.getElementById(id).classList.remove('open');
-  if (id === 'modal-add') stopCamera();
+  document.getElementById(id)?.classList.remove('open');
+  // Stop camera when the add-modal is closed
+  if (id === 'modal-add') {
+    import('./scanner.js').then(s => s.stopCamera()).catch(() => {});
+  }
 }
 
 // Close on backdrop click
@@ -73,29 +82,35 @@ document.querySelectorAll('.modal-overlay').forEach(o =>
 window.openModal  = openModal;
 window.closeModal = closeModal;
 
-// ── Add-item modal ────────────────────────────────────────────
+// ── Add-item modal lifecycle ──────────────────────────────────
 export function openAddModal() {
   if (!_state.user) { navigate('login'); return; }
 
+  // Reset all scan state
+  const ids = [
+    'add-step-1', 'scan-result', 'scan-preview-img',
+    'cover-scan-result', 'cover-scan-preview', 'book-search-results',
+  ];
   document.getElementById('add-step-1').style.display = '';
   document.getElementById('add-step-2').style.display = 'none';
   document.getElementById('add-footer').style.display = 'none';
-  document.getElementById('scan-result').style.display = 'none';
-  document.getElementById('scan-preview-img').style.display = 'none';
-  document.getElementById('cover-scan-result').style.display = 'none';
-  document.getElementById('cover-scan-preview').style.display = 'none';
-  document.getElementById('book-search-results').style.display = 'none';
 
-  const barcodeEl = document.getElementById('barcode-manual');
-  if (barcodeEl) barcodeEl.value = '';
+  ['scan-result', 'scan-preview-img', 'cover-scan-result', 'cover-scan-preview', 'book-search-results'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+
+  const barcodeEl   = document.getElementById('barcode-manual');
   const coverTitleEl = document.getElementById('cover-title-input');
+  if (barcodeEl)    barcodeEl.value    = '';
   if (coverTitleEl) coverTitleEl.value = '';
 
-  _state.selectedType  = null;
-  _state.editingItem   = {};
-  _state.lookupResult  = null;
+  _state.selectedType = null;
+  _state.editingItem  = {};
+  _state.lookupResult = null;
   resetComicTags();
-  stopCamera();
+
+  import('./scanner.js').then(s => s.stopCamera()).catch(() => {});
   openModal('modal-add');
 }
 window.openAddModal = openAddModal;
@@ -111,12 +126,19 @@ export function selectType(id) {
 window.selectType = selectType;
 
 export function backToStep1() {
-  stopCamera();
+  import('./scanner.js').then(s => s.stopCamera()).catch(() => {});
   document.getElementById('add-step-1').style.display = '';
   document.getElementById('add-step-2').style.display = 'none';
   document.getElementById('add-footer').style.display = 'none';
 }
 window.backToStep1 = backToStep1;
+
+// ── openTrade (called from detail modal) ──────────────────────
+export function openTrade() {
+  closeModal('modal-detail');
+  openModal('modal-trade');
+}
+window.openTrade = openTrade;
 
 // ═══════════════════════════════════════════════════════════════
 // TABS
@@ -125,7 +147,9 @@ window.backToStep1 = backToStep1;
 /**
  * switchTab(tabId, scope)
  * scope: 'add' | 'trade' | 'profile'
- * Uses data-scope attributes to avoid cross-contamination between tab groups.
+ *
+ * Uses data-scope attributes on .tabs containers to avoid
+ * cross-contaminating separate tab groups on the same page.
  */
 export function switchTab(tabId, scope) {
   let tabsContainer = null;
@@ -136,8 +160,7 @@ export function switchTab(tabId, scope) {
   if (tabsContainer) {
     tabsContainer.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     tabsContainer.querySelector(`.tab-btn[data-tab="${tabId}"]`)?.classList.add('active');
-
-    // Deactivate sibling tab-content panels
+    // Deactivate sibling panels within this scope's parent
     tabsContainer.parentElement.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   }
 
@@ -150,10 +173,12 @@ window.switchTab = switchTab;
 // ═══════════════════════════════════════════════════════════════
 
 export function toast(msg, type = '') {
+  const container = document.getElementById('toast');
+  if (!container) return;
   const el = document.createElement('div');
   el.className = 'toast-msg ' + (type || '');
   el.innerHTML = (type === 'success' ? '✓ ' : type === 'error' ? '✕ ' : '') + msg;
-  document.getElementById('toast').appendChild(el);
+  container.appendChild(el);
   setTimeout(() => el.remove(), 3500);
 }
 window.toast = toast;
@@ -163,20 +188,24 @@ window.toast = toast;
 // ═══════════════════════════════════════════════════════════════
 
 export function buildMediaGrids() {
-  // Home page showcase
-  document.getElementById('home-media-grid').innerHTML = MEDIA_TYPES.map(m =>
-    `<div class="media-card"><div class="media-icon">${m.icon}</div><div class="media-label">${m.label}</div></div>`
-  ).join('');
+  const homeGrid = document.getElementById('home-media-grid');
+  if (homeGrid) {
+    homeGrid.innerHTML = MEDIA_TYPES.map(m =>
+      `<div class="media-card"><div class="media-icon">${m.icon}</div><div class="media-label">${m.label}</div></div>`
+    ).join('');
+  }
 
-  // Add-item step 1
-  document.getElementById('add-media-grid').innerHTML = MEDIA_TYPES.map(m =>
-    `<div class="media-card" onclick="window.selectType('${m.id}')">
-       <div class="media-icon">${m.icon}</div>
-       <div class="media-label">${m.label}</div>
-     </div>`
-  ).join('');
+  const addGrid = document.getElementById('add-media-grid');
+  if (addGrid) {
+    addGrid.innerHTML = MEDIA_TYPES.map(m =>
+      `<div class="media-card" onclick="window.selectType('${m.id}')">
+         <div class="media-icon">${m.icon}</div>
+         <div class="media-label">${m.label}</div>
+       </div>`
+    ).join('');
+  }
 
-  // Filter dropdowns
+  // Type-filter dropdowns
   ['col-filter-type', 'wish-type'].forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
@@ -193,17 +222,18 @@ export function buildMediaGrids() {
 // ═══════════════════════════════════════════════════════════════
 
 const DEMO_COLLECTION = [
-  { id:'d1', type:'comic',    typeLabel:'Comic Book',   icon:'🦸', fields:{ title:'Amazing Spider-Man #129', publisher:'Marvel',        pub_date:'Feb 1974', condition:'Very Fine',  writer:'Gerry Conway',    edition_type:'Newsstand'    }, coverData:null, source:'manual'     },
-  { id:'d2', type:'vinyl',    typeLabel:'Vinyl',         icon:'🎵', fields:{ album:'Kind of Blue',            artist:'Miles Davis',       label:'Columbia',    year:'1959',           condition:'Near Mint',    pressing:'US Original'       }, coverData:null, source:'manual'     },
-  { id:'d3', type:'book',     typeLabel:'Book',          icon:'📗', fields:{ title:'Dune',                    author:'Frank Herbert',     publisher:'Chilton', pub_year:'1965',       condition:'Good',         binding:'Hardcover'           }, coverData:null, source:'Open Library'},
-  { id:'d4', type:'game',     typeLabel:'Video Game',    icon:'🎮', fields:{ title:'The Legend of Zelda',     platform:'NES',             publisher:'Nintendo', year:'1987',          condition:'Very Good',    complete:'Yes'                }, coverData:null, source:'UPCitemdb'  },
-  { id:'d5', type:'magazine', typeLabel:'Magazine',      icon:'📖', fields:{ title:'Rolling Stone',           issue:'#1',                 pub_date:'Nov 1967', publisher:'Straight Arrow', condition:'Fair'                                  }, coverData:null, source:'manual'     },
-  { id:'d6', type:'comic',    typeLabel:'Comic Book',    icon:'🦸', fields:{ title:'X-Men #1',                publisher:'Marvel',         pub_date:'Sep 1963', condition:'Good',      writer:'Stan Lee'                                     }, coverData:null, source:'manual'     },
+  { id:'d1', type:'comic',    typeLabel:'Comic Book',  icon:'🦸', fields:{ title:'Amazing Spider-Man #129', publisher:'Marvel',        pub_date:'Feb 1974', condition:'Very Fine',  writer:'Gerry Conway', edition_type:'Newsstand' }, coverData:null, source:'manual'      },
+  { id:'d2', type:'vinyl',    typeLabel:'Vinyl',        icon:'🎵', fields:{ album:'Kind of Blue',            artist:'Miles Davis',       label:'Columbia',    year:'1959',           condition:'Near Mint', pressing:'US Original'    }, coverData:null, source:'manual'      },
+  { id:'d3', type:'book',     typeLabel:'Book',         icon:'📗', fields:{ title:'Dune',                    author:'Frank Herbert',     publisher:'Chilton', pub_year:'1965',       condition:'Good',      binding:'Hardcover'        }, coverData:null, source:'Open Library' },
+  { id:'d4', type:'game',     typeLabel:'Video Game',   icon:'🎮', fields:{ title:'The Legend of Zelda',     platform:'NES',             publisher:'Nintendo',year:'1987',           condition:'Very Good', complete:'Yes'             }, coverData:null, source:'UPCitemdb'    },
+  { id:'d5', type:'magazine', typeLabel:'Magazine',     icon:'📖', fields:{ title:'Rolling Stone',           issue:'#1',                 pub_date:'Nov 1967', publisher:'Straight Arrow', condition:'Fair'                           }, coverData:null, source:'manual'      },
+  { id:'d6', type:'comic',    typeLabel:'Comic Book',   icon:'🦸', fields:{ title:'X-Men #1',                publisher:'Marvel',         pub_date:'Sep 1963', condition:'Good',      writer:'Stan Lee'                              }, coverData:null, source:'manual'      },
 ];
 
 function renderDiscover() {
   const grid = document.getElementById('discover-grid');
-  const all  = [...DEMO_COLLECTION, ..._state.collection.slice(0, 6)];
+  if (!grid) return;
+  const all = [...DEMO_COLLECTION, ..._state.collection.slice(0, 6)];
   grid.innerHTML = all.map(i => {
     const title = i.fields?.title || i.fields?.album || i.fields?.artist || 'Item';
     const sub   = i.fields?.author || i.fields?.artist || i.fields?.writer || i.fields?.year || '';
@@ -225,27 +255,31 @@ function renderDiscover() {
 function renderTrade() {
   _renderConvoList();
 
-  document.getElementById('traders-grid').innerHTML = [
-    { name:'Marcus Hall', user:'vinyl_king', items:42, icon:'🎵' },
-    { name:'Sara Liu',    user:'comix_sara', items:87, icon:'🦸' },
-    { name:'Tom B.',      user:'retrogames', items:31, icon:'🎮' },
-    { name:'Priya N.',    user:'bookstack',  items:56, icon:'📗' },
-  ].map(t => `
-    <div class="card"><div class="card-body flex items-center gap-3">
-      <div class="avatar" style="font-size:22px">${t.icon}</div>
-      <div style="flex:1">
-        <div class="fw-500">${t.name}</div>
-        <div class="text-muted text-xs mono">@${t.user}</div>
-        <div class="text-xs" style="margin-top:4px">${t.items} items</div>
-      </div>
-      <button class="btn-ghost" style="font-size:12px" onclick="window.startMessage('${t.user}')">Message</button>
-    </div></div>`).join('');
+  const tradersGrid = document.getElementById('traders-grid');
+  if (tradersGrid) {
+    tradersGrid.innerHTML = [
+      { name:'Marcus Hall', user:'vinyl_king', items:42, icon:'🎵' },
+      { name:'Sara Liu',    user:'comix_sara', items:87, icon:'🦸' },
+      { name:'Tom B.',      user:'retrogames', items:31, icon:'🎮' },
+      { name:'Priya N.',    user:'bookstack',  items:56, icon:'📗' },
+    ].map(t => `
+      <div class="card"><div class="card-body flex items-center gap-3">
+        <div class="avatar" style="font-size:22px">${t.icon}</div>
+        <div style="flex:1">
+          <div class="fw-500">${t.name}</div>
+          <div class="text-muted text-xs mono">@${t.user}</div>
+          <div class="text-xs" style="margin-top:4px">${t.items} items</div>
+        </div>
+        <button class="btn-ghost" style="font-size:12px" onclick="window.startMessage('${t.user}')">Message</button>
+      </div></div>`).join('');
+  }
 
   renderWishlist();
 }
 
 function _renderConvoList() {
   const cl = document.getElementById('convo-list');
+  if (!cl) return;
   cl.innerHTML = _state.messages.length === 0
     ? `<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">No conversations yet</div>`
     : _state.messages.map((m, i) => `
@@ -261,6 +295,7 @@ function _renderConvoList() {
 window._openConvo = function(idx) {
   const m     = _state.messages[idx];
   const panel = document.getElementById('chat-panel');
+  if (!panel) return;
   panel.innerHTML = `
     <div style="font-weight:600;font-size:13px;padding-bottom:10px;border-bottom:1px solid var(--border)">💬 ${m.to}</div>
     <div class="flex-col gap-2" style="flex:1;overflow-y:auto;padding:8px 0" id="chat-msgs">
@@ -279,7 +314,7 @@ window._openConvo = function(idx) {
 
 window._sendChatMsg = async function(idx) {
   const inp  = document.getElementById('chat-input');
-  const text = inp.value.trim();
+  const text = inp?.value.trim();
   if (!text) return;
   _state.messages[idx].msgs.push({
     from: 'me', text,
@@ -288,17 +323,20 @@ window._sendChatMsg = async function(idx) {
   if (window._fb?.enabled) await window._fb.saveMessages(_state.messages);
   else saveState();
   window._openConvo(idx);
-  inp.value = '';
+  if (inp) inp.value = '';
 };
 
 window.sendTradeMessage = async function() {
-  const to   = document.getElementById('trade-to').value.trim();
-  const text = document.getElementById('trade-msg').value.trim();
+  const to   = document.getElementById('trade-to')?.value.trim();
+  const text = document.getElementById('trade-msg')?.value.trim();
   if (!to || !text) { toast('Please fill in all fields', 'error'); return; }
-  const msg = { from:'me', text, time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) };
+  const msg = {
+    from: 'me', text,
+    time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }),
+  };
   const existing = _state.messages.find(m => m.to === to);
   if (existing) existing.msgs.push(msg);
-  else _state.messages.push({ to, msgs:[msg] });
+  else _state.messages.push({ to, msgs: [msg] });
   _state.trades++;
   if (window._fb?.enabled) await window._fb.saveMessages(_state.messages);
   else saveState();
@@ -307,18 +345,21 @@ window.sendTradeMessage = async function() {
 };
 
 window.startMessage = function(user) {
-  document.getElementById('trade-to').value  = user;
-  document.getElementById('trade-msg').value = '';
+  const toEl  = document.getElementById('trade-to');
+  const msgEl = document.getElementById('trade-msg');
+  if (toEl)  toEl.value  = user;
+  if (msgEl) msgEl.value = '';
   openModal('modal-trade');
 };
 
 // ── Wishlist ──────────────────────────────────────────────────
 window.addWish = async function() {
-  const text = document.getElementById('wish-input').value.trim();
-  const type = document.getElementById('wish-type').value;
+  const text = document.getElementById('wish-input')?.value.trim();
+  const type = document.getElementById('wish-type')?.value;
   if (!text) { toast('Enter an item', 'error'); return; }
-  _state.wishlist.push({ id:'w' + Date.now(), text, type, date: new Date().toLocaleDateString() });
-  document.getElementById('wish-input').value = '';
+  _state.wishlist.push({ id: 'w' + Date.now(), text, type, date: new Date().toLocaleDateString() });
+  const inputEl = document.getElementById('wish-input');
+  if (inputEl) inputEl.value = '';
   if (window._fb?.enabled) await window._fb.saveWishlist(_state.wishlist);
   else saveState();
   renderWishlist();
@@ -355,10 +396,14 @@ export function renderProfile() {
   if (!_state.user) return;
   const u = _state.user;
 
-  document.getElementById('prof-avatar').textContent   = (u.firstName || '?')[0].toUpperCase();
-  document.getElementById('prof-name').textContent     = u.firstName + ' ' + u.lastName;
-  document.getElementById('prof-username').textContent = '@' + u.username;
-  document.getElementById('prof-member').textContent   = 'Member since ' + u.joined;
+  const profAvatar  = document.getElementById('prof-avatar');
+  const profName    = document.getElementById('prof-name');
+  const profUser    = document.getElementById('prof-username');
+  const profMember  = document.getElementById('prof-member');
+  if (profAvatar) profAvatar.textContent  = (u.firstName || '?')[0].toUpperCase();
+  if (profName)   profName.textContent    = `${u.firstName} ${u.lastName}`;
+  if (profUser)   profUser.textContent    = `@${u.username}`;
+  if (profMember) profMember.textContent  = `Member since ${u.joined}`;
 
   const types = new Set(_state.collection.map(i => i.type));
   document.getElementById('pstat-items').textContent  = _state.collection.length;
@@ -366,36 +411,45 @@ export function renderProfile() {
   document.getElementById('pstat-trades').textContent = _state.trades;
   document.getElementById('pstat-wish').textContent   = _state.wishlist.length;
 
-  document.getElementById('set-name').value  = u.firstName + ' ' + u.lastName;
-  document.getElementById('set-email').value = u.email || '';
+  const setName  = document.getElementById('set-name');
+  const setEmail = document.getElementById('set-email');
+  if (setName)  setName.value  = `${u.firstName} ${u.lastName}`;
+  if (setEmail) setEmail.value = u.email || '';
 
-  document.getElementById('prof-col-grid').innerHTML = _state.collection.slice(0, 8).map(i => {
-    const title = i.fields?.title || i.fields?.album || i.fields?.artist || 'Item';
-    return `<div class="col-item">
-      <div class="col-thumb">${i.coverData ? `<img src="${i.coverData}" alt="${title}">` : (i.icon || '📦')}<div class="col-badge">${i.typeLabel}</div></div>
-      <div class="col-info"><div class="col-title truncate">${title}</div></div>
-    </div>`;
-  }).join('');
+  const profGrid = document.getElementById('prof-col-grid');
+  if (profGrid) {
+    profGrid.innerHTML = _state.collection.slice(0, 8).map(i => {
+      const title = i.fields?.title || i.fields?.album || i.fields?.artist || 'Item';
+      return `<div class="col-item">
+        <div class="col-thumb">${i.coverData ? `<img src="${i.coverData}" alt="${title}">` : (i.icon || '📦')}<div class="col-badge">${i.typeLabel}</div></div>
+        <div class="col-info"><div class="col-title truncate">${title}</div></div>
+      </div>`;
+    }).join('');
+  }
 
   buildThemePickers();
 }
 window.renderProfile = renderProfile;
 
 window.saveSettings = async function() {
-  const parts = document.getElementById('set-name').value.trim().split(' ');
-  if (_state.user) {
-    _state.user.firstName = parts[0] || _state.user.firstName;
-    _state.user.lastName  = parts.slice(1).join(' ') || _state.user.lastName;
-    _state.user.email     = document.getElementById('set-email').value.trim();
-    const avatarEl = document.getElementById('nav-avatar');
-    if (avatarEl) avatarEl.textContent = (_state.user.firstName || '?')[0].toUpperCase();
-    if (window._fb?.enabled) {
-      await window._fb.updateProfile(_state.user.id, {
-        firstName: _state.user.firstName,
-        lastName:  _state.user.lastName,
-        email:     _state.user.email,
-      });
-    }
+  const nameEl  = document.getElementById('set-name');
+  const emailEl = document.getElementById('set-email');
+  if (!_state.user) return;
+
+  const parts = (nameEl?.value.trim() || '').split(' ');
+  _state.user.firstName = parts[0] || _state.user.firstName;
+  _state.user.lastName  = parts.slice(1).join(' ') || _state.user.lastName;
+  _state.user.email     = emailEl?.value.trim() || _state.user.email;
+
+  const avatarEl = document.getElementById('nav-avatar');
+  if (avatarEl) avatarEl.textContent = (_state.user.firstName || '?')[0].toUpperCase();
+
+  if (window._fb?.enabled) {
+    await window._fb.updateProfile(_state.user.id, {
+      firstName: _state.user.firstName,
+      lastName:  _state.user.lastName,
+      email:     _state.user.email,
+    });
   }
   saveState();
   toast('Settings saved', 'success');

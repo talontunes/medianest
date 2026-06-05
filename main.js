@@ -1,49 +1,61 @@
 // js/main.js
 // ─────────────────────────────────────────────────────────────
-// App entry point. Imported as type="module" in index.html.
-// Waits for Firebase module signal then boots.
+// App entry point. Loaded as <script type="module"> AFTER
+// firebase.js in index.html. Waits for window._fbReady signal.
 // ─────────────────────────────────────────────────────────────
 
-import { loadState } from './storage.js';
+import { loadState }                                from './storage.js';
 import { applyTheme, buildThemePickers, toggleThemePicker } from './theme.js';
-import { buildMediaGrids, navigate } from './ui.js';
+import { buildMediaGrids, navigate, openAddModal, selectType, backToStep1, openTrade, switchTab, closeModal, openModal, toast } from './ui.js';
 import { updateNavForAuth, doLogin, doSignup, logout } from './auth.js';
-import { saveItem, deleteItem, setView, renderCollection, openDetail } from './collection.js';
+import { saveItem, deleteItem, setCollectionView, renderCollection, openDetail } from './collection.js';
 import { startCamera, stopCamera, captureFrame, handleScanDrop, handleScanFile, handleCoverScanDrop, handleCoverScanFile } from './scanner.js';
-import { lookupBarcode, searchBookByTitle } from './lookup.js';
-import { _state } from './state.js';
+import { lookupBarcode, searchBookByTitle }          from './lookup.js';
+import { _state }                                    from './state.js';
 
-// ── Expose everything that index.html inline handlers need ─────
-window.applyTheme         = applyTheme;
-window.toggleThemePicker  = toggleThemePicker;
-window.doLogin            = doLogin;
-window.doSignup           = doSignup;
-window.logout             = logout;
-window.saveItem           = saveItem;
-window.deleteItem         = deleteItem;
-window.setView            = setView;
-window.renderCollection   = renderCollection;
-window.startCamera        = startCamera;
-window.stopCamera         = stopCamera;
-window.captureFrame       = captureFrame;
-window.handleScanDrop     = handleScanDrop;
-window.handleScanFile     = handleScanFile;
+// ─────────────────────────────────────────────────────────────
+// Expose everything that index.html inline handlers need
+// (all onclick="window.X()" attributes route through here)
+// ─────────────────────────────────────────────────────────────
+window.applyTheme          = applyTheme;
+window.toggleThemePicker   = toggleThemePicker;
+window.navigate            = navigate;
+window.openAddModal        = openAddModal;
+window.selectType          = selectType;
+window.backToStep1         = backToStep1;
+window.switchTab           = switchTab;
+window.openModal           = openModal;
+window.closeModal          = closeModal;
+window.toast               = toast;
+
+window.doLogin             = doLogin;
+window.doSignup            = doSignup;
+window.logout              = logout;
+window.updateNavForAuth    = updateNavForAuth;
+
+window.saveItem            = saveItem;
+window.deleteItem          = deleteItem;
+window.setCollectionView   = setCollectionView;   // grid/list toggle in collection page
+window.renderCollection    = renderCollection;
+window.openDetail          = openDetail;
+window.openTrade           = openTrade;
+
+window.startCamera         = startCamera;
+window.stopCamera          = stopCamera;
+window.captureFrame        = captureFrame;
+window.handleScanDrop      = handleScanDrop;
+window.handleScanFile      = handleScanFile;
 window.handleCoverScanDrop = handleCoverScanDrop;
 window.handleCoverScanFile = handleCoverScanFile;
-window.lookupBarcode      = lookupBarcode;
-window.searchBookByTitle  = searchBookByTitle;
-window.openDetail         = openDetail;
 
-window.openTrade = function() {
-  import('./ui.js').then(ui => {
-    import('./collection.js').then(() => {
-      ui.closeModal('modal-detail');
-      ui.openModal('modal-trade');
-    });
-  });
-};
+window.lookupBarcode       = lookupBarcode;
+window.searchBookByTitle   = searchBookByTitle;
 
-// ── Boot ───────────────────────────────────────────────────────
+window.renderProfile       = () => import('./ui.js').then(m => m.renderProfile());
+
+// ─────────────────────────────────────────────────────────────
+// Boot
+// ─────────────────────────────────────────────────────────────
 function initApp() {
   loadState();
   applyTheme(_state.theme || 'dark');
@@ -51,21 +63,22 @@ function initApp() {
   buildMediaGrids();
 
   if (window._fb?.enabled) {
-    // Firebase initialized — onAuthStateChanged in firebase.js handles nav
+    // Firebase configured — onAuthStateChanged in firebase.js drives navigation
     updateNavForAuth();
   } else {
     // Local fallback mode
     updateNavForAuth();
-    if (_state.user) navigate('collection');
-    else navigate('home');
+    navigate(_state.user ? 'collection' : 'home');
   }
 }
 
+// firebase.js sets window._fbReady and calls window._fbReadyCb when done.
+// If it already fired (e.g. no Firebase config → instant), boot now.
 if (window._fbReady) {
   initApp();
 } else {
   window._fbReadyCb = initApp;
-  // Safety timeout: if the Firebase module never fires, boot in local mode
+  // Safety net: if firebase.js never signals (network issue etc.), boot after 3 s
   setTimeout(() => {
     if (!window._fbReady) {
       window._fbReady = true;

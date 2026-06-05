@@ -27,7 +27,7 @@ export async function saveItem() {
     source:    _state.lookupResult?.source || 'manual',
   };
 
-  // Collect all [data-field] inputs/selects/textareas
+  // Collect all [data-field] inputs
   document.querySelectorAll('[data-field]').forEach(el => {
     if (el.dataset.field) item.fields[el.dataset.field] = el.value || '';
   });
@@ -56,6 +56,7 @@ export async function saveItem() {
   resetComicTags();
   _state.lookupResult = null;
 }
+window.saveItem = saveItem;
 
 // ═══════════════════════════════════════════════════════════════
 // DELETE
@@ -74,18 +75,28 @@ export async function deleteItem() {
   renderCollection();
   toast('Item removed', 'success');
 }
+window.deleteItem = deleteItem;
 
 // ═══════════════════════════════════════════════════════════════
-// RENDER
+// GRID / LIST TOGGLE
+// FIX: renamed from setView → setCollectionView to avoid clashing
+// with old HTML `setView('login')` navigation calls.
 // ═══════════════════════════════════════════════════════════════
 
-export function setView(v) {
+export function setCollectionView(v) {
   _state.view = v;
-  document.getElementById('vt-grid').classList.toggle('active', v === 'grid');
-  document.getElementById('vt-list').classList.toggle('active', v === 'list');
-  document.getElementById('col-grid').style.display = v === 'grid' ? '' : 'none';
-  document.getElementById('col-list').style.display = v === 'list' ? '' : 'none';
+  document.getElementById('vt-grid')?.classList.toggle('active', v === 'grid');
+  document.getElementById('vt-list')?.classList.toggle('active', v === 'list');
+  const grid = document.getElementById('col-grid');
+  const list = document.getElementById('col-list');
+  if (grid) grid.style.display = v === 'grid' ? '' : 'none';
+  if (list) list.style.display = v === 'list' ? '' : 'none';
 }
+window.setCollectionView = setCollectionView;
+
+// ═══════════════════════════════════════════════════════════════
+// RENDER COLLECTION
+// ═══════════════════════════════════════════════════════════════
 
 export function renderCollection() {
   if (!_state.user) return;
@@ -112,6 +123,7 @@ export function renderCollection() {
       case 'condition':return (fa.condition || '').localeCompare(fb.condition || '');
       case 'type':     return a.typeLabel.localeCompare(b.typeLabel);
       default: {
+        // Handle Firestore Timestamps (.toDate()) vs ISO strings
         const dateA = a.dateAdded?.toDate ? a.dateAdded.toDate() : new Date(a.dateAdded || 0);
         const dateB = b.dateAdded?.toDate ? b.dateAdded.toDate() : new Date(b.dateAdded || 0);
         return dateB - dateA;
@@ -124,21 +136,26 @@ export function renderCollection() {
   const empty = document.getElementById('col-empty');
 
   if (items.length === 0) {
-    grid.innerHTML = ''; list.innerHTML = '';
-    empty.style.display = '';
+    if (grid)  grid.innerHTML  = '';
+    if (list)  list.innerHTML  = '';
+    if (empty) empty.style.display = '';
     return;
   }
-  empty.style.display = 'none';
+  if (empty) empty.style.display = 'none';
 
-  grid.innerHTML = items.map(_colItemHtml).join('');
-  grid.querySelectorAll('.col-item').forEach(el =>
-    el.addEventListener('click', () => openDetail(el.dataset.id))
-  );
+  if (grid) {
+    grid.innerHTML = items.map(_colItemHtml).join('');
+    grid.querySelectorAll('.col-item').forEach(el =>
+      el.addEventListener('click', () => openDetail(el.dataset.id))
+    );
+  }
 
-  list.innerHTML = items.map(_colListHtml).join('');
-  list.querySelectorAll('.col-list-item').forEach(el =>
-    el.addEventListener('click', () => openDetail(el.dataset.id))
-  );
+  if (list) {
+    list.innerHTML = items.map(_colListHtml).join('');
+    list.querySelectorAll('.col-list-item').forEach(el =>
+      el.addEventListener('click', () => openDetail(el.dataset.id))
+    );
+  }
 }
 window.renderCollection = renderCollection;
 
@@ -183,33 +200,43 @@ export function openDetail(id) {
   if (!item) return;
   _state.detailItem = item;
 
-  const title = item.fields?.title || item.fields?.album || item.fields?.artist || 'Untitled';
-  document.getElementById('detail-title').textContent = title;
+  const title   = item.fields?.title || item.fields?.album || item.fields?.artist || 'Untitled';
+  const titleEl = document.getElementById('detail-title');
+  if (titleEl) titleEl.textContent = title;
 
   const coverEl = document.getElementById('detail-cover');
-  if (item.coverData) {
-    coverEl.innerHTML = `<img src="${item.coverData}" alt="${title}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">`;
-  } else {
-    coverEl.innerHTML = item.icon;
-    coverEl.style.fontSize = '56px';
+  if (coverEl) {
+    if (item.coverData) {
+      coverEl.innerHTML = `<img src="${item.coverData}" alt="${title}" style="width:100%;height:100%;object-fit:cover;border-radius:10px">`;
+    } else {
+      coverEl.innerHTML    = item.icon;
+      coverEl.style.fontSize = '56px';
+    }
   }
 
-  const skip = ['notes', '_coverData'];
-  document.getElementById('detail-meta').innerHTML =
-    `<tr><td>Type</td><td>${item.typeLabel}</td></tr>` +
-    (item.source && item.source !== 'manual' ? `<tr><td>Source</td><td>${item.source}</td></tr>` : '') +
-    Object.entries(item.fields || {})
-      .filter(([k, v]) => v && !skip.includes(k))
-      .map(([k, v]) => `<tr><td>${FIELD_LABELS[k] || k}</td><td>${v}</td></tr>`)
-      .join('');
+  const skip    = ['notes', '_coverData'];
+  const metaEl  = document.getElementById('detail-meta');
+  if (metaEl) {
+    metaEl.innerHTML =
+      `<tr><td>Type</td><td>${item.typeLabel}</td></tr>` +
+      (item.source && item.source !== 'manual' ? `<tr><td>Source</td><td>${item.source}</td></tr>` : '') +
+      Object.entries(item.fields || {})
+        .filter(([k, v]) => v && !skip.includes(k))
+        .map(([k, v]) => `<tr><td>${FIELD_LABELS[k] || k}</td><td>${v}</td></tr>`)
+        .join('');
+  }
 
-  document.getElementById('detail-extra').innerHTML = item.fields?.notes
-    ? `<div style="font-size:12px;color:var(--text2);padding:12px;background:var(--bg3);border-radius:8px">${item.fields.notes}</div>`
-    : '';
+  const extraEl = document.getElementById('detail-extra');
+  if (extraEl) {
+    extraEl.innerHTML = item.fields?.notes
+      ? `<div style="font-size:12px;color:var(--text2);padding:12px;background:var(--bg3);border-radius:8px">${item.fields.notes}</div>`
+      : '';
+  }
 
   _handleDetailResponsive();
   openModal('modal-detail');
 }
+window.openDetail = openDetail;
 
 function _handleDetailResponsive() {
   const isMobile = window.innerWidth < 600;
@@ -218,14 +245,14 @@ function _handleDetailResponsive() {
   const grid     = document.getElementById('detail-inner-grid');
   if (!sideCol || !mobAct || !grid) return;
   if (isMobile) {
-    sideCol.style.display = 'none';
-    mobAct.style.display  = 'flex';
+    sideCol.style.display      = 'none';
+    mobAct.style.display       = 'flex';
     mobAct.style.flexDirection = 'column';
-    mobAct.style.gap = '8px';
+    mobAct.style.gap           = '8px';
     grid.style.gridTemplateColumns = '1fr';
   } else {
-    sideCol.style.display = '';
-    mobAct.style.display  = 'none';
+    sideCol.style.display  = '';
+    mobAct.style.display   = 'none';
     grid.style.gridTemplateColumns = '160px 1fr';
   }
 }

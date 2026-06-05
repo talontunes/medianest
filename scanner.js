@@ -1,16 +1,13 @@
 // js/scanner.js
 // ─────────────────────────────────────────────────────────────
 // Barcode scanning (camera + file upload) and book cover OCR.
-// Uses ZXing 0.19.x (BrowserMultiFormatReader) for barcodes
-// and Tesseract.js (lazy-loaded) for cover text extraction.
+// Uses ZXing 0.19.x (BrowserMultiFormatReader) for barcodes.
+// Tesseract.js is lazy-loaded from CDN for cover OCR.
 // ─────────────────────────────────────────────────────────────
 
 import { _state } from './state.js';
 import { toast, switchTab } from './ui.js';
-import { lookupBarcode } from './lookup.js';
-import { MEDIA_TYPES } from './state.js';
-import { buildManualForm } from './forms.js';
-import { searchBookByTitle, applyCoverSearchResult } from './lookup.js';
+import { lookupBarcode, searchBookByTitle } from './lookup.js';
 
 // ── Camera state ──────────────────────────────────────────────
 let _cameraStream   = null;
@@ -39,11 +36,13 @@ export async function startCamera() {
     video.srcObject = stream;
     await video.play();
 
-    document.getElementById('camera-container').classList.add('active');
-    document.getElementById('scan-drop').style.display = 'none';
-    document.getElementById('camera-controls').style.display = 'flex';
+    document.getElementById('camera-container')?.classList.add('active');
+    const scanDrop = document.getElementById('scan-drop');
+    if (scanDrop) scanDrop.style.display = 'none';
+    const controls = document.getElementById('camera-controls');
+    if (controls) controls.style.display = 'flex';
 
-    toast('Camera active — point at a barcode and capture', 'success');
+    toast('Camera active — point at a barcode', 'success');
     _startContinuousZXingScan();
 
   } catch (e) {
@@ -63,20 +62,18 @@ export function stopCamera() {
   const video = document.getElementById('camera-video');
   if (video) video.srcObject = null;
 
-  const container = document.getElementById('camera-container');
-  if (container) container.classList.remove('active');
+  document.getElementById('camera-container')?.classList.remove('active');
 
-  const drop = document.getElementById('scan-drop');
-  if (drop) drop.style.display = '';
+  const scanDrop = document.getElementById('scan-drop');
+  if (scanDrop) scanDrop.style.display = '';
 
   const controls = document.getElementById('camera-controls');
   if (controls) controls.style.display = 'none';
 }
 
-// Capture a still frame from the live video and decode it
 export async function captureFrame() {
   const video = document.getElementById('camera-video');
-  if (!video.videoWidth) { toast('Camera not ready yet', 'error'); return; }
+  if (!video?.videoWidth) { toast('Camera not ready yet', 'error'); return; }
 
   const canvas = document.createElement('canvas');
   canvas.width  = video.videoWidth;
@@ -85,15 +82,14 @@ export async function captureFrame() {
 
   const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
   const preview = document.getElementById('scan-preview-img');
-  preview.src = dataUrl;
-  preview.style.display = '';
+  if (preview) { preview.src = dataUrl; preview.style.display = ''; }
 
   stopCamera();
   showScanStatus('loading', '<span class="spin">⏳</span> Reading barcode from captured frame…');
   await _runZXingOnDataUrl(dataUrl);
 }
 
-// ── Continuous ZXing scan from live video frames ───────────────
+// ── Continuous ZXing scan from live video ─────────────────────
 function _startContinuousZXingScan() {
   if (!window.ZXing) return;
   _cameraScanning = true;
@@ -103,17 +99,16 @@ function _startContinuousZXingScan() {
   const canvas = document.createElement('canvas');
 
   const tick = async () => {
-    if (!_cameraScanning || !video.videoWidth) {
+    if (!_cameraScanning || !video?.videoWidth) {
       if (_cameraScanning) requestAnimationFrame(tick);
       return;
     }
-
     canvas.width  = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
 
     try {
-      // decodeFromCanvas is the correct API in ZXing 0.19.x
+      // FIX: use decodeFromCanvas — the correct synchronous API in ZXing 0.19.x
       const result = codeReader.decodeFromCanvas(canvas);
       if (result) {
         const code = result.getText();
@@ -128,6 +123,8 @@ function _startContinuousZXingScan() {
            <br><span style="color:var(--text2);font-size:12px;display:block;margin-top:4px">Looking up item details…</span>`
         );
         toast('Barcode read: ' + code, 'success');
+        // FIX: call the directly-imported lookupBarcode, not window.lookupBarcode
+        // (window version may not be set yet when this closure first forms)
         lookupBarcode(code);
         return;
       }
@@ -136,7 +133,7 @@ function _startContinuousZXingScan() {
     if (_cameraScanning) setTimeout(tick, 200);
   };
 
-  setTimeout(tick, 500); // give video stream a moment to stabilise
+  setTimeout(tick, 500); // give video a moment to stabilise
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -145,7 +142,7 @@ function _startContinuousZXingScan() {
 
 export function handleScanDrop(e) {
   e.preventDefault();
-  document.getElementById('scan-drop').classList.remove('drag-over');
+  document.getElementById('scan-drop')?.classList.remove('drag-over');
   const file = e.dataTransfer.files[0];
   if (file && file.type.startsWith('image/')) processScanFile(file);
   else toast('Please drop an image file', 'error');
@@ -160,8 +157,7 @@ export function processScanFile(file) {
   const reader = new FileReader();
   reader.onload = ev => {
     const img = document.getElementById('scan-preview-img');
-    img.src = ev.target.result;
-    img.style.display = '';
+    if (img) { img.src = ev.target.result; img.style.display = ''; }
     _state.editingItem._coverData = null;
     showScanStatus('loading', '<span class="spin">⏳</span> Reading barcode with ZXing…');
     _runZXingOnDataUrl(ev.target.result);
@@ -169,7 +165,7 @@ export function processScanFile(file) {
   reader.readAsDataURL(file);
 }
 
-// ── Core ZXing decode — loads image onto canvas then decodes ───
+// ── Core ZXing decode ─────────────────────────────────────────
 async function _runZXingOnDataUrl(dataUrl) {
   if (!window.ZXing) {
     showScanStatus('no-match', '⚠ ZXing library not loaded. Type the barcode manually below.');
@@ -177,7 +173,7 @@ async function _runZXingOnDataUrl(dataUrl) {
   }
 
   try {
-    // 1. Load image element (needed by ZXing fallback path)
+    // Load image into an HTMLImageElement first
     const image = new Image();
     await new Promise((res, rej) => {
       image.onload  = res;
@@ -185,7 +181,7 @@ async function _runZXingOnDataUrl(dataUrl) {
       image.src     = dataUrl;
     });
 
-    // 2. Draw to offscreen canvas
+    // Draw onto an offscreen canvas
     const canvas = document.createElement('canvas');
     canvas.width  = image.naturalWidth  || image.width;
     canvas.height = image.naturalHeight || image.height;
@@ -195,11 +191,11 @@ async function _runZXingOnDataUrl(dataUrl) {
     let code;
 
     try {
-      // Primary: canvas decode (fastest, most compatible with 0.19.x)
+      // Primary: synchronous canvas decode (fastest, most compatible with ZXing 0.19.x)
       const result = codeReader.decodeFromCanvas(canvas);
       code = result.getText();
     } catch (_) {
-      // Fallback: decode from the image URL directly
+      // Fallback: async decode from data URL
       const result = await codeReader.decodeFromImage(undefined, dataUrl);
       code = result.getText();
     }
@@ -214,26 +210,28 @@ async function _runZXingOnDataUrl(dataUrl) {
     toast('Barcode read: ' + code, 'success');
     lookupBarcode(code);
 
-  } catch (err) {
+  } catch (_err) {
     showScanStatus('no-match',
       `<strong>⚠ No barcode found in this photo.</strong>
        <br><span style="color:var(--text2);font-size:12px;display:block;margin-top:6px">
          Tips: ensure the barcode is in focus, well-lit, and fills most of the frame.
-         <br>Try the <strong>Book Cover Scan</strong> tab, or type the number manually below.
+         <br>Try the <strong>Book Cover</strong> tab, or type the barcode manually below.
        </span>`
     );
   }
 }
 
-// ── Status display helpers ─────────────────────────────────────
+// ── Scan-status helpers ───────────────────────────────────────
 export function showScanStatus(type, html) {
   const el = document.getElementById('scan-result');
+  if (!el) return;
   el.style.display = '';
   el.innerHTML = `<div class="scan-status-box ${type}">${html}</div>`;
 }
 
 export function showCoverScanStatus(type, html) {
   const el = document.getElementById('cover-scan-result');
+  if (!el) return;
   el.style.display = '';
   el.innerHTML = `<div class="scan-status-box ${type}">${html}</div>`;
 }
@@ -244,7 +242,7 @@ export function showCoverScanStatus(type, html) {
 
 export function handleCoverScanDrop(e) {
   e.preventDefault();
-  document.getElementById('cover-drop').classList.remove('drag-over');
+  document.getElementById('cover-drop')?.classList.remove('drag-over');
   const file = e.dataTransfer.files[0];
   if (file && file.type.startsWith('image/')) processCoverScanFile(file);
   else toast('Please drop an image file', 'error');
@@ -259,8 +257,7 @@ export function processCoverScanFile(file) {
   const reader = new FileReader();
   reader.onload = ev => {
     const img = document.getElementById('cover-scan-preview');
-    img.src = ev.target.result;
-    img.style.display = '';
+    if (img) { img.src = ev.target.result; img.style.display = ''; }
     _state.editingItem._coverData = ev.target.result;
     showCoverScanStatus('loading', '<span class="spin">⏳</span> Extracting text from cover image…');
     _extractTextFromCoverImage(ev.target.result);
@@ -268,14 +265,13 @@ export function processCoverScanFile(file) {
   reader.readAsDataURL(file);
 }
 
-// ── OCR via Tesseract.js (lazy-loaded from CDN) ────────────────
+// ── OCR via Tesseract.js (lazy-loaded from CDN) ───────────────
 async function _extractTextFromCoverImage(dataUrl) {
   try {
-    // Lazy-load Tesseract.js
     if (!window.Tesseract) {
       showCoverScanStatus('loading', '<span class="spin">⏳</span> Loading OCR engine…');
       await new Promise((res, rej) => {
-        const s = document.createElement('script');
+        const s   = document.createElement('script');
         s.src     = 'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js';
         s.onload  = res;
         s.onerror = rej;
@@ -283,7 +279,7 @@ async function _extractTextFromCoverImage(dataUrl) {
       });
     }
 
-    showCoverScanStatus('loading', '<span class="spin">⏳</span> Running OCR on cover image… (this may take a moment)');
+    showCoverScanStatus('loading', '<span class="spin">⏳</span> Running OCR… (this may take a moment)');
 
     const worker = await Tesseract.createWorker('eng', 1, {
       logger: m => {
@@ -297,7 +293,7 @@ async function _extractTextFromCoverImage(dataUrl) {
     const { data: { text } } = await worker.recognize(dataUrl);
     await worker.terminate();
 
-    // Filter to lines that look like real words (not pure numbers/punctuation)
+    // Keep lines that look like real words (not pure numbers/punctuation)
     const lines = text
       .split('\n')
       .map(l => l.trim())
@@ -311,14 +307,15 @@ async function _extractTextFromCoverImage(dataUrl) {
       return;
     }
 
-    const candidate = lines[0];
-    const titleInput = document.getElementById('cover-title-input');
+    const candidate   = lines[0];
+    const titleInput  = document.getElementById('cover-title-input');
     if (titleInput) titleInput.value = candidate;
 
     showCoverScanStatus('matched',
       `<strong>✓ Text detected:</strong> "${candidate}"
        <br><span style="font-size:12px;color:var(--text2);display:block;margin-top:4px">Searching Open Library…</span>`
     );
+    // FIX: call directly-imported searchBookByTitle
     searchBookByTitle(candidate);
 
   } catch (ocrErr) {
@@ -326,7 +323,7 @@ async function _extractTextFromCoverImage(dataUrl) {
     showCoverScanStatus('info',
       `<strong>ℹ OCR engine unavailable.</strong>
        <br><span style="font-size:12px;color:var(--text2)">
-         Type the title or author in the box below and click Search.
+         Type the title or author below and click Search.
        </span>`
     );
   }
