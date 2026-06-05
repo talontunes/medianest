@@ -15,6 +15,8 @@ const FIREBASE_CONFIG = {
   measurementId:     "G-LP4CXC2KYW",
 };
 
+import './state.js';
+
 // Guard: only initialise when real config values are present
 // FIX: the old guard checked for placeholder strings — now checks
 // that apiKey doesn't start with "YOUR_" and has meaningful length.
