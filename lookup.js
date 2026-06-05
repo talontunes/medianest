@@ -103,6 +103,8 @@ export function applyLookupResult() {
 // BOOK TITLE SEARCH (used by book-cover scan tab)
 // ═══════════════════════════════════════════════════════════════
 
+let __bookSearchResults = [];
+
 export async function searchBookByTitle(queryOverride) {
   const query = queryOverride || document.getElementById('cover-title-input')?.value.trim();
   if (!query) { toast('Enter a title or author to search', 'error'); return; }
@@ -110,8 +112,10 @@ export async function searchBookByTitle(queryOverride) {
   showCoverScanStatus('loading', `<span class="spin">⏳</span> Searching for "<strong>${query}</strong>"…`);
 
   const resultsEl = document.getElementById('book-search-results');
-  resultsEl.style.display = 'none';
-  resultsEl.innerHTML = '';
+  if (resultsEl) {
+    resultsEl.style.display = 'none';
+    resultsEl.innerHTML = '';
+  }
 
   try {
     const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=5` +
@@ -128,40 +132,38 @@ export async function searchBookByTitle(queryOverride) {
       return;
     }
 
-    showCoverScanStatus('matched', `<strong>✓ Found ${Math.min(data.docs.length, 5)} results</strong> — tap one to apply:`);
-    resultsEl.style.display = 'flex';
-    resultsEl.innerHTML = data.docs.slice(0, 5).map((doc, idx) => {
-      const title     = doc.title || 'Unknown Title';
-      const author    = (doc.author_name || []).join(', ') || '';
-      const year      = doc.first_publish_year || '';
-      const publisher = (doc.publisher || [])[0] || '';
-      const isbn      = (doc.isbn || [])[0] || '';
-      const coverId   = doc.cover_i;
-      const coverUrl  = coverId ? `https://covers.openlibrary.org/b/id/${coverId}-M.jpg` : null;
-      const thumbHtml = coverUrl
-        ? `<img src="${coverUrl}" alt="${title}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.innerHTML='📗'">`
-        : '📗';
+    __bookSearchResults = data.docs.slice(0, 5).map(doc => ({
+      title:     doc.title || 'Unknown Title',
+      author:    (doc.author_name || []).join(', ') || '',
+      year:      doc.first_publish_year || '',
+      publisher: (doc.publisher || [])[0] || '',
+      isbn:      (doc.isbn || [])[0] || '',
+      coverUrl:  doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : null,
+      pages:     doc.number_of_pages || '',
+      language:  (doc.language || [])[0] || '',
+      genre:     (doc.subject || []).slice(0, 3).join(', '),
+    }));
 
-      // Encode result data as JSON in a data attribute (safe-escaped)
-      const resultData = JSON.stringify({
-        title, author, publisher, pub_year: year, isbn, coverUrl,
-        pages:    doc.number_of_pages || '',
-        language: (doc.language || [])[0] || '',
-        genre:    (doc.subject || []).slice(0, 3).join(', '),
-      }).replace(/'/g, '&apos;');
+    if (resultsEl) {
+      showCoverScanStatus('matched', `<strong>✓ Found ${__bookSearchResults.length} results</strong> — tap one to apply:`);
+      resultsEl.style.display = 'flex';
+      resultsEl.innerHTML = __bookSearchResults.map((doc, idx) => {
+        const thumbHtml = doc.coverUrl
+          ? `<img src="${doc.coverUrl}" alt="${doc.title}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.innerHTML='📗'">`
+          : '📗';
 
-      return `<div class="book-scan-result-item" onclick="window.applyCoverSearchResult(${idx})"
-                   data-result='${resultData}'>
-        <div style="width:48px;height:68px;background:var(--bg2);border-radius:5px;flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:20px">${thumbHtml}</div>
-        <div style="flex:1;min-width:0">
-          <div class="fw-600" style="font-size:13px">${title}</div>
-          ${author    ? `<div class="text-sm text-muted">${author}</div>`                         : ''}
-          ${(publisher || year) ? `<div class="text-xs text-muted">${[publisher, year].filter(Boolean).join(' · ')}</div>` : ''}
-          ${isbn      ? `<div class="text-xs mono" style="color:var(--text3)">ISBN ${isbn}</div>` : ''}
-        </div>
-        <button class="lookup-apply-btn" style="flex-shrink:0">Apply</button>
-      </div>`;
-    }).join('');
+        return `<div class="book-scan-result-item" onclick="window.applyCoverSearchResult(${idx})">
+          <div style="width:48px;height:68px;background:var(--bg2);border-radius:5px;flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:20px">${thumbHtml}</div>
+          <div style="flex:1;min-width:0">
+            <div class="fw-600" style="font-size:13px">${doc.title}</div>
+            ${doc.author ? `<div class="text-sm text-muted">${doc.author}</div>` : ''}
+            ${(doc.publisher || doc.year) ? `<div class="text-xs text-muted">${[doc.publisher, doc.year].filter(Boolean).join(' · ')}</div>` : ''}
+            ${doc.isbn ? `<div class="text-xs mono" style="color:var(--text3)">ISBN ${doc.isbn}</div>` : ''}
+          </div>
+          <button class="lookup-apply-btn" style="flex-shrink:0">Apply</button>
+        </div>`;
+      }).join('');
+    }
 
   } catch (e) {
     showCoverScanStatus('no-match',
@@ -173,16 +175,11 @@ export async function searchBookByTitle(queryOverride) {
 }
 
 export function applyCoverSearchResult(idx) {
-  const items = document.querySelectorAll('.book-scan-result-item');
-  if (!items[idx]) return;
-  items.forEach(i => i.classList.remove('selected'));
-  items[idx].classList.add('selected');
-
-  let result;
-  try {
-    const raw = items[idx].dataset.result.replace(/&apos;/g, "'");
-    result = JSON.parse(raw);
-  } catch (e) { toast('Could not parse result', 'error'); return; }
+  const result = __bookSearchResults[idx];
+  if (!result) {
+    toast('Could not find that search result', 'error');
+    return;
+  }
 
   // Ensure we're in book mode
   if (_state.selectedType?.id !== 'book') {
