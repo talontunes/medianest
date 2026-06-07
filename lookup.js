@@ -55,6 +55,7 @@ export async function lookupBarcode(codeOverride) {
   let result = null;
   if (isISBN) {
     result = await _lookupOpenLibrary(code);
+    if (!result) result = await _lookupGoogleBooks(code);
     if (!result) result = await _lookupInternetArchive(code);
   }
   if (!result) result = await _lookupUPCitemdb(code);
@@ -275,6 +276,54 @@ async function _lookupOpenLibrary(isbn) {
       description:  b.excerpts?.[0]?.text || '',
     };
   } catch (e) { console.warn('OpenLibrary error:', e); return null; }
+}
+
+async function _lookupGoogleBooks(isbn) {
+  try {
+    const r = await _fetchWithTimeout(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`, 8000);
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (!data.items?.length) return null;
+    
+    const book = data.items[0].volumeInfo;
+    if (!book) return null;
+
+    // Extract genres/subjects — Google Books may have better categorization
+    const genres = [];
+    if (book.categories) {
+      genres.push(...book.categories.slice(0, 2));
+    }
+    if (book.subject) {
+      genres.push(...(Array.isArray(book.subject) ? book.subject : [book.subject]).slice(0, 1));
+    }
+    const genreStr = genres.filter(g => g && g.length > 0).slice(0, 3).join(', ');
+
+    // Extract language code
+    let language = '';
+    if (book.language) {
+      language = book.language.toUpperCase();
+      // Convert language codes (e.g., 'en' → 'EN', 'es' → 'ES')
+      if (language.length === 2) {
+        const langMap = { en: 'ENGLISH', es: 'SPANISH', fr: 'FRENCH', de: 'GERMAN', it: 'ITALIAN', pt: 'PORTUGUESE', nl: 'DUTCH', pl: 'POLISH', ru: 'RUSSIAN', zh: 'CHINESE', ja: 'JAPANESE', ko: 'KOREAN' };
+        language = langMap[language.toLowerCase()] || language;
+      }
+    }
+
+    return {
+      source:       'Google Books',
+      title:        book.title || '',
+      author:       book.authors ? book.authors.join(', ') : '',
+      publisher:    book.publisher || '',
+      pub_year:     book.publishedDate?.match(/\d{4}/)?.[0] || '',
+      isbn,
+      pages:        book.pageCount?.toString() || '',
+      language:     language,
+      genre:        genreStr,
+      coverUrl:     book.imageLinks?.thumbnail || null,
+      suggestedType: 'book',
+      description:  book.description || '',
+    };
+  } catch (e) { console.warn('Google Books error:', e); return null; }
 }
 
 async function _lookupInternetArchive(code) {

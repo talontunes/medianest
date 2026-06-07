@@ -90,12 +90,15 @@ export async function doSignup() {
   const last  = document.getElementById('su-last').value.trim();
   const uname = document.getElementById('su-user').value.trim();
   const email = document.getElementById('su-email').value.trim();
+  const phone = document.getElementById('su-phone').value.trim();
   const pw    = document.getElementById('su-pw').value;
   const errEl = document.getElementById('su-err');
+  const unameErrEl = document.getElementById('su-user-err');
   errEl.textContent = ''; errEl.classList.remove('show');
+  if (unameErrEl) { unameErrEl.textContent = ''; unameErrEl.classList.remove('show'); }
 
   if (!first || !last || !uname || !email || !pw) {
-    showSignupError('Please fill in all fields.'); return;
+    showSignupError('Please fill in all required fields.'); return;
   }
   if (pw.length < 8) {
     showSignupError('Password must be at least 8 characters.'); return;
@@ -103,12 +106,19 @@ export async function doSignup() {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     showSignupError('Please enter a valid email address.'); return;
   }
+  if (uname.length < 3 || !/^[a-zA-Z0-9_-]+$/.test(uname)) {
+    if (unameErrEl) {
+      unameErrEl.textContent = 'Username must be 3+ characters, alphanumeric + _ -';
+      unameErrEl.classList.add('show');
+    }
+    return;
+  }
 
   setAuthLoading('signup-btn', true);
 
   if (window._fb?.enabled) {
     try {
-      await window._fb.signup(email, pw, first, last, uname);
+      await window._fb.signup(email, pw, first, last, uname, phone);
       // FIX: reset button on success (navigation handled by onAuthStateChanged)
       setAuthLoading('signup-btn', false, 'Create account');
       toast('Welcome, ' + first + '! Your collection is ready.', 'success');
@@ -126,11 +136,14 @@ export async function doSignup() {
     setAuthLoading('signup-btn', false, 'Create account'); return;
   }
   if (users.find(u => u.username === uname)) {
-    showSignupError('That username is already taken.');
+    if (unameErrEl) {
+      unameErrEl.textContent = 'That username is already taken.';
+      unameErrEl.classList.add('show');
+    }
     setAuthLoading('signup-btn', false, 'Create account'); return;
   }
   const newUser = {
-    id: 'u' + Date.now(), username: uname, email,
+    id: 'u' + Date.now(), username: uname, email, phone: phone || null,
     firstName: first, lastName: last, password: pw,
     joined: new Date().toISOString().split('T')[0],
   };
@@ -147,6 +160,60 @@ export function loginUser(user) {
   navigate('collection');
   saveState();
 }
+
+// ── Google OAuth (Gmail Sign-In / Sign-Up) ────────────────────
+export async function doGoogleLogin() {
+  setAuthLoading('login-google-btn', true, 'Signing in…');
+
+  if (window._fb?.enabled && window._fb.googleLogin) {
+    try {
+      await window._fb.googleLogin();
+      setAuthLoading('login-google-btn', false, '🔐 Sign in with Google');
+    } catch (e) {
+      showLoginError('Google sign-in failed: ' + (e.message || 'Unknown error'));
+      setAuthLoading('login-google-btn', false, '🔐 Sign in with Google');
+    }
+  } else {
+    showLoginError('Google sign-in is not available in this environment.');
+    setAuthLoading('login-google-btn', false, '🔐 Sign in with Google');
+  }
+}
+window.doGoogleLogin = doGoogleLogin;
+
+export async function doGoogleSignup() {
+  setAuthLoading('signup-google-btn', true, 'Creating account…');
+
+  if (window._fb?.enabled && window._fb.googleSignup) {
+    try {
+      await window._fb.googleSignup();
+      setAuthLoading('signup-google-btn', false, '🔐 Sign up with Google');
+    } catch (e) {
+      showSignupError('Google sign-up failed: ' + (e.message || 'Unknown error'));
+      setAuthLoading('signup-google-btn', false, '🔐 Sign up with Google');
+    }
+  } else {
+    showSignupError('Google sign-up is not available in this environment.');
+    setAuthLoading('signup-google-btn', false, '🔐 Sign up with Google');
+  }
+}
+window.doGoogleSignup = doGoogleSignup;
+
+// ── Username validation helper ────────────────────────────────
+export function isUsernameAvailable(username) {
+  if (!username || username.length < 3) return false;
+  if (!/^[a-zA-Z0-9_-]+$/.test(username)) return false;
+  
+  if (window._fb?.enabled) {
+    // Firebase mode: would need to query Firestore
+    // For now, return true — Firebase will validate on the backend
+    return true;
+  }
+  
+  // Local mode: check localStorage
+  const users = getUsers();
+  return !users.find(u => u.username === username);
+}
+window.isUsernameAvailable = isUsernameAvailable;
 
 // ── Logout ────────────────────────────────────────────────────
 export async function logout() {

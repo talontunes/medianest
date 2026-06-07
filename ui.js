@@ -382,26 +382,63 @@ function renderTrade() {
     });
   }
 
+  // Render traders: only actual registered users with items in their collection
   const tradersGrid = document.getElementById('traders-grid');
   if (tradersGrid) {
-    tradersGrid.innerHTML = [
-      { name:'Marcus Hall', user:'vinyl_king', items:42, icon:'🎵' },
-      { name:'Sara Liu',    user:'comix_sara', items:87, icon:'🦸' },
-      { name:'Tom B.',      user:'retrogames', items:31, icon:'🎮' },
-      { name:'Priya N.',    user:'bookstack',  items:56, icon:'📗' },
-    ].map(t => `
-      <div class="card"><div class="card-body flex items-center gap-3">
-        <div class="avatar" style="font-size:22px">${t.icon}</div>
-        <div style="flex:1">
-          <div class="fw-500">${t.name}</div>
-          <div class="text-muted text-xs mono">@${t.user}</div>
-          <div class="text-xs" style="margin-top:4px">${t.items} items</div>
-        </div>
-        <button class="btn-ghost" style="font-size:12px" onclick="window.startMessage('${t.user}')">Message</button>
-      </div></div>`).join('');
+    const traders = _getAvailableTraders();
+    if (traders.length === 0) {
+      tradersGrid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:40px; color:var(--text3)">
+        <div style="font-size:32px;margin-bottom:10px">👥</div>
+        <div>No other collectors available yet</div>
+        <div style="font-size:12px;margin-top:8px">As more users join, you'll see them here</div>
+      </div>`;
+    } else {
+      tradersGrid.innerHTML = traders.map(t => `
+        <div class="card"><div class="card-body flex items-center gap-3">
+          <div class="avatar" style="font-size:22px;width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:var(--bg2);border-radius:50%">${t.icon}</div>
+          <div style="flex:1">
+            <div class="fw-500">${t.name}</div>
+            <div class="text-muted text-xs mono">@${t.username}</div>
+            <div class="text-xs" style="margin-top:4px">${t.items} item${t.items !== 1 ? 's' : ''}</div>
+          </div>
+          <button class="btn-ghost" style="font-size:12px" onclick="window.startMessage('${t.username}')">Message</button>
+        </div></div>`).join('');
+    }
   }
 
   renderWishlist();
+}
+
+// Helper: get available traders from current collection and Firebase if available
+function _getAvailableTraders() {
+  const traders = [];
+  
+  if (window._fb?.enabled && window._fb.getAllUsers) {
+    // Firebase mode: get all users
+    try {
+      const allUsers = window._fb.getAllUsers?.() || [];
+      allUsers.forEach(user => {
+        if (user.id === _state.user?.id) return; // Skip self
+        if (!user.collection || user.collection.length === 0) return; // Skip users with no items
+        
+        const firstItem = user.collection[0];
+        const icon = firstItem?.icon || '📦';
+        traders.push({
+          name: user.firstName + ' ' + user.lastName || user.username,
+          username: user.username,
+          items: user.collection.length,
+          icon: icon,
+        });
+      });
+    } catch (e) {
+      console.warn('Could not load traders from Firebase:', e);
+    }
+  } else {
+    // Local mode: only show current user's collection info (no trading with self)
+    // In a real app, you'd fetch from a shared database
+  }
+  
+  return traders.sort((a, b) => b.items - a.items);
 }
 
 function _renderConvoList() {
@@ -550,9 +587,11 @@ export function renderProfile() {
   const setName  = document.getElementById('set-name');
   const setEmail = document.getElementById('set-email');
   const setBio   = document.getElementById('set-bio');
+  const setPhone = document.getElementById('set-phone');
   if (setName)  setName.value  = `${u.firstName} ${u.lastName}`;
   if (setEmail) setEmail.value = u.email || '';
   if (setBio)   setBio.value   = u.bio || '';
+  if (setPhone) setPhone.value = u.phone || '';
 
   const profGrid = document.getElementById('prof-col-grid');
   if (profGrid) {
@@ -573,6 +612,7 @@ window.saveSettings = async function() {
   const nameEl  = document.getElementById('set-name');
   const emailEl = document.getElementById('set-email');
   const bioEl   = document.getElementById('set-bio');
+  const phoneEl = document.getElementById('set-phone');
   if (!_state.user) return;
 
   const parts = (nameEl?.value.trim() || '').split(' ');
@@ -580,6 +620,7 @@ window.saveSettings = async function() {
   _state.user.lastName  = parts.slice(1).join(' ') || _state.user.lastName;
   _state.user.email     = emailEl?.value.trim() || _state.user.email;
   _state.user.bio       = bioEl?.value.trim() || _state.user.bio;
+  _state.user.phone     = phoneEl?.value.trim() || null;
 
   const avatarEl = document.getElementById('nav-avatar');
   if (avatarEl) avatarEl.textContent = (_state.user.firstName || '?')[0].toUpperCase();
@@ -590,6 +631,7 @@ window.saveSettings = async function() {
       lastName:  _state.user.lastName,
       email:     _state.user.email,
       bio:       _state.user.bio,
+      phone:     _state.user.phone,
     });
   }
   saveState();

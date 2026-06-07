@@ -69,6 +69,7 @@ if (!FIREBASE_ENABLED) {
               username:  prof.username  || firebaseUser.email.split("@")[0],
               firstName: prof.firstName || firebaseUser.displayName?.split(" ")[0] || "User",
               lastName:  prof.lastName  || firebaseUser.displayName?.split(" ").slice(1).join(" ") || "",
+              phone:     prof.phone     || null,
               joined:    prof.joined    || new Date().toISOString().split("T")[0],
             };
           } catch (profileErr) {
@@ -77,6 +78,7 @@ if (!FIREBASE_ENABLED) {
               id: firebaseUser.uid, email: firebaseUser.email,
               username: firebaseUser.email.split("@")[0],
               firstName: "User", lastName: "",
+              phone: null,
               joined: new Date().toISOString().split("T")[0],
             };
           }
@@ -110,11 +112,11 @@ if (!FIREBASE_ENABLED) {
 
         login: (email, pw) => signInWithEmailAndPassword(auth, email, pw),
 
-        signup: async (email, pw, firstName, lastName, username) => {
+        signup: async (email, pw, firstName, lastName, username, phone) => {
           const cred = await createUserWithEmailAndPassword(auth, email, pw);
           await updateProfile(cred.user, { displayName: firstName + " " + lastName });
           await setDoc(doc(db, "users", cred.user.uid), {
-            firstName, lastName, username, email,
+            firstName, lastName, username, email, phone: phone || null,
             joined: new Date().toISOString().split("T")[0],
           });
           return cred;
@@ -200,6 +202,44 @@ if (!FIREBASE_ENABLED) {
             orderBy('createdAt', 'asc')
           );
           return onSnapshot(q, snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+        },
+
+        // Google OAuth — requires Google Cloud Setup in Firebase Console
+        googleLogin: async () => {
+          // Implementation would require GoogleAuthProvider from Firebase
+          // For now, this is a stub. To enable:
+          // 1. Set up OAuth credentials in Firebase Console
+          // 2. Import GoogleAuthProvider from firebase-auth
+          // 3. Use signInWithPopup(auth, new GoogleAuthProvider())
+          throw new Error('Google Sign-In requires Firebase configuration');
+        },
+
+        googleSignup: async () => {
+          // Same as googleLogin — stub that requires Firebase setup
+          throw new Error('Google Sign-Up requires Firebase configuration');
+        },
+
+        // Get all users for trading page — returns public user profiles
+        getAllUsers: async () => {
+          try {
+            const snap = await getDocs(collection(db, 'users'));
+            return snap.docs
+              .map(d => {
+                const data = d.data();
+                return {
+                  id: d.id,
+                  firstName: data.firstName || '',
+                  lastName: data.lastName || '',
+                  username: data.username || '',
+                  collection: data.collection || [],
+                  joined: data.joined,
+                };
+              })
+              .filter(u => u.collection && u.collection.length > 0); // Only users with items
+          } catch (e) {
+            console.warn('Could not load users:', e);
+            return [];
+          }
         },
       };
 
