@@ -227,35 +227,55 @@ async function _runZXingOnDataUrl(dataUrl) {
 
     const codeReader = new ZXing.BrowserMultiFormatReader();
     let code;
-
-    try {
-      // Primary path: synchronous canvas decode — fastest in ZXing 0.19.x
-      const result = codeReader.decodeFromCanvas(canvas);
-      code = result.getText();
-    } catch (_canvasErr) {
-      const hints = new Map();
-      if (window.ZXing?.DecodeHintType) {
-        hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
-      }
+      // First try native BarcodeDetector if available (faster and more reliable on some devices)
+      let result = null;
+      let codeFromDetector = null;
       try {
-        const result = await codeReader.decodeFromImage(image, hints);
-        code = result.getText();
-      } catch (_imgErr) {
-        // Both paths failed — no barcode detected in this image.
-        throw new Error('No barcode found');
+        if (window.BarcodeDetector && typeof BarcodeDetector === 'function') {
+          try {
+            const bitmap = await createImageBitmap(canvas);
+            const detector = new BarcodeDetector({formats: ['ean_13','ean_8','upc_a','upc_e','code_128','code_39']});
+            const barcodes = await detector.detect(bitmap);
+            if (barcodes && barcodes.length) {
+              codeFromDetector = barcodes[0].rawValue || barcodes[0].raw || null;
+            }
+          } catch (bdErr) {
+            // BarcodeDetector may fail on some browsers; fall back to ZXing below.
+          }
+        }
+      } catch (e) {
+        codeFromDetector = null;
       }
-    }
 
-    const manualEl = document.getElementById('barcode-manual');
-    if (manualEl) manualEl.value = code;
-
-    showScanStatus('matched',
-      `<strong>✓ Barcode detected:</strong> <span class="mono" style="color:var(--accent)">${code}</span>
-       <br><span style="color:var(--text2);font-size:12px;display:block;margin-top:4px">Looking up item details…</span>`
-    );
-    toast('Barcode read: ' + code, 'success');
-    lookupBarcode(code);
-
+      if (codeFromDetector) {
+        // pretend we have a ZXing result object
+        result = { getText: () => codeFromDetector };
+      } else {
+        // decodeFromCanvas throws NotFoundException when no barcode found — that's normal.
+        try {
+          result = codeReader.decodeFromCanvas(canvas);
+        } catch (_canvasErr) {
+          // Try with hints to improve detection
+          const hints = new Map();
+          if (window.ZXing?.DecodeHintType) {
+            hints.set(window.ZXing.DecodeHintType.TRY_HARDER, true);
+          }
+          try {
+            result = await codeReader.decodeFromImage(canvas, hints);
+          } catch (_) {
+            // Both methods failed, keep scanning
+          }
+        }
+      }
+      if (result) {
+        const code = result.getText();
+        showScanStatus('matched',
+          `<strong>✓ Barcode detected:</strong> <span class="mono" style="color:var(--accent)">${code}</span>
+           <br><span style="color:var(--text2);font-size:12px;display:block;margin-top:4px">Looking up item details…</span>`
+        );
+        toast('Barcode read: ' + code, 'success');
+        lookupBarcode(code);
+        }
   } catch (_err) {
     showScanStatus('no-match',
       `<strong>⚠ No barcode found in this photo.</strong>

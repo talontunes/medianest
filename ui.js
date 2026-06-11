@@ -116,6 +116,9 @@ export function openAddModal(item) {
     buildManualForm();
     populateManualForm(item);
 
+    // Update cover tab UI based on this item's type
+    _updateCoverTabUI();
+
     const titleEl = document.getElementById('add-modal-title');
     const saveBtn = document.getElementById('add-save-btn');
     if (titleEl) titleEl.textContent = 'Edit item';
@@ -174,7 +177,17 @@ window.openTrade = openTrade;
 // ─ Update cover tab UI based on selected media type ─
 function _updateCoverTabUI() {
   const mt = _state.selectedType;
-  if (!mt) return;
+  // If no media type selected, hide the cover tab entirely
+  if (!mt) {
+    const tabsContainer = document.querySelector('#add-step-2 .tabs[data-scope="add"]');
+    if (tabsContainer) {
+      const coverBtn = tabsContainer.querySelector('.tab-btn[data-tab="cover-tab"]');
+      if (coverBtn) coverBtn.style.display = 'none';
+    }
+    const coverPanel = document.getElementById('tab-cover-tab');
+    if (coverPanel) coverPanel.style.display = 'none';
+    return;
+  }
   
   const coverDropText = document.getElementById('cover-drop-text');
   const coverIcon = document.getElementById('cover-scanner-icon');
@@ -219,6 +232,15 @@ function _updateCoverTabUI() {
   
   if (coverDropText) coverDropText.textContent = scanText;
   if (coverInfoText) coverInfoText.innerHTML = `<strong>Cover scan:</strong> Upload a photo — ${infoText}. Or type the title/artist/name below.`;
+
+  // Show or hide the cover tab depending on media type support
+  const tabsContainer = document.querySelector('#add-step-2 .tabs[data-scope="add"]');
+  if (tabsContainer) {
+    const coverBtn = tabsContainer.querySelector('.tab-btn[data-tab="cover-tab"]');
+    if (coverBtn) coverBtn.style.display = (mt.coverScan ? '' : 'none');
+  }
+  const coverPanel = document.getElementById('tab-cover-tab');
+  if (coverPanel) coverPanel.style.display = (mt.coverScan ? '' : 'none');
 }
 
 // ═══════════════════════════════════════════════════════════════

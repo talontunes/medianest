@@ -22,20 +22,20 @@ window._state = _state;
 
 // ── MEDIA TYPES ───────────────────────────────────────────────
 export const MEDIA_TYPES = [
-  { id:'cd',       icon:'💿', label:'CD',           fields:['artist','album','year','label','catalog','pressing','condition','format','notes'] },
-  { id:'vinyl',    icon:'🎵', label:'Vinyl',         fields:['artist','album','year','label','catalog','pressing','speed','condition','notes'] },
-  { id:'cassette', icon:'📼', label:'Cassette',      fields:['artist','album','year','label','condition','notes'] },
-  { id:'book',     icon:'📗', label:'Book',          fields:['title','author','publisher','pub_year','isbn','edition','binding','condition','genre','language','notes'] },
-  { id:'comic',    icon:'🦸', label:'Comic Book',    fields:['title','issue','publisher','pub_date','cover_artist','writer','penciler','inker','colorist','variant','print_run','edition_type','grade','grader','newsstand','printing','signed','stamp','condition','notes'], isComic:true },
-  { id:'manga',    icon:'📘', label:'Manga',         fields:['title','volume','publisher','pub_year','author','edition','condition','notes'] },
-  { id:'newspaper',icon:'📰', label:'Newspaper',     fields:['title','issue_date','headline','edition','condition','notes'] },
-  { id:'magazine', icon:'📖', label:'Magazine',      fields:['title','issue','pub_date','publisher','condition','notes'] },
-  { id:'game',     icon:'🎮', label:'Video Game',    fields:['title','platform','publisher','year','region','disc_count','condition','complete','notes'] },
-  { id:'dvd',      icon:'📀', label:'DVD / Blu-ray', fields:['title','year','studio','format','region','condition','notes'] },
-  { id:'vhs',      icon:'📹', label:'VHS',           fields:['title','year','studio','condition','notes'] },
-  { id:'map',      icon:'🗺',  label:'Map / Poster',  fields:['title','publisher','year','size','condition','notes'] },
-  { id:'photo',    icon:'🖼',  label:'Photograph',    fields:['subject','photographer','year','size','medium','condition','notes'] },
-  { id:'other',    icon:'📦', label:'Other',         fields:['title','creator','year','type','condition','notes'] },
+  { id:'cd',       icon:'💿', label:'CD',           fields:['artist','album','year','label','catalog','pressing','condition','format','notes'], coverScan:true },
+  { id:'vinyl',    icon:'🎵', label:'Vinyl',         fields:['artist','album','year','label','catalog','pressing','speed','condition','notes'], coverScan:true },
+  { id:'cassette', icon:'📼', label:'Cassette',      fields:['artist','album','year','label','condition','notes'], coverScan:true },
+  { id:'book',     icon:'📗', label:'Book',          fields:['title','author','publisher','pub_year','isbn','edition','binding','condition','genre','language','notes'], coverScan:true },
+  { id:'comic',    icon:'🦸', label:'Comic Book',    fields:['title','issue','publisher','pub_date','cover_artist','writer','penciler','inker','colorist','variant','print_run','edition_type','grade','grader','newsstand','printing','signed','stamp','condition','notes'], isComic:true, coverScan:true },
+  { id:'manga',    icon:'📘', label:'Manga',         fields:['title','volume','publisher','pub_year','author','edition','condition','notes'], coverScan:true },
+  { id:'newspaper',icon:'📰', label:'Newspaper',     fields:['title','issue_date','headline','edition','condition','notes'], coverScan:true },
+  { id:'magazine', icon:'📖', label:'Magazine',      fields:['title','issue','pub_date','publisher','condition','notes'], coverScan:true },
+  { id:'game',     icon:'🎮', label:'Video Game',    fields:['title','platform','publisher','year','region','disc_count','condition','complete','notes'], coverScan:true },
+  { id:'dvd',      icon:'📀', label:'DVD / Blu-ray', fields:['title','year','studio','format','region','condition','notes'], coverScan:true },
+  { id:'vhs',      icon:'📹', label:'VHS',           fields:['title','year','studio','condition','notes'], coverScan:true },
+  { id:'map',      icon:'🗺',  label:'Map / Poster',  fields:['title','publisher','year','size','condition','notes'], coverScan:false },
+  { id:'photo',    icon:'🖼',  label:'Photograph',    fields:['subject','photographer','year','size','medium','condition','notes'], coverScan:true },
+  { id:'other',    icon:'📦', label:'Other',         fields:['title','creator','year','type','condition','notes'], coverScan:false },
 ];
 
 // ── FIELD LABELS ──────────────────────────────────────────────
