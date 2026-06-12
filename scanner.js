@@ -45,9 +45,11 @@ async function _getZxingReader() {
   }
 
   const hints = new Map();
-  // TRY_HARDER is essential for real-world photos
+  // TRY_HARDER is essential for real-world photos.
   hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-  // All 1-D retail formats
+  // Also try inverted barcodes/contrast variants.
+  hints.set(ZXing.DecodeHintType.ALSO_INVERTED, true);
+  // All 1-D retail formats.
   hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
     ZXing.BarcodeFormat.EAN_13,
     ZXing.BarcodeFormat.EAN_8,
@@ -112,6 +114,28 @@ async function _decodeBarcodeFromDataUrl(dataUrl) {
     if (blobUrl) URL.revokeObjectURL(blobUrl);
   }
 
+  // ── Engine 2b: ZXing canvas fallback for very clean / high-res images ─
+  try {
+    const reader = await _getZxingReader();
+    const img = await _dataUrlToImage(dataUrl);
+    const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const result = await reader.decodeFromCanvas(canvas);
+    if (result?.getText()) {
+      console.log('[scanner] ZXing canvas fallback hit:', result.getText());
+      return result.getText();
+    }
+  } catch (e) {
+    if (!e.message?.includes('No MultiFormat')) {
+      console.warn('[scanner] ZXing canvas fallback error:', e.message);
+    }
+  }
+
   // ── Engine 3: ZXing multi-attempt with preprocessing ─────
   // For real-world photos: try different crops, contrast boost,
   // binarization, and upscaling to find the barcode.
@@ -152,8 +176,8 @@ async function _zxingMultiAttempt(dataUrl) {
   for (const [rx, ry, rw, rh] of regions) {
     for (const mode of modes) {
       const canvas = _buildProcessedCanvas(img, W, H, rx, ry, rw, rh, mode);
-      // Try at 1× and 2× scale for small/low-res barcodes
-      for (const scale of [1, 2]) {
+      // Try at multiple scales for small, high-res and very clear barcodes.
+      for (const scale of [0.75, 1, 2, 3]) {
         let blobUrl2 = null;
         try {
           const scaled = _scaleCanvas(canvas, scale);
@@ -240,8 +264,8 @@ function _buildProcessedCanvas(img, W, H, rx, ry, rw, rh, mode) {
 function _scaleCanvas(src, scale) {
   if (scale === 1) return src;
   const dst = document.createElement('canvas');
-  dst.width  = src.width  * scale;
-  dst.height = src.height * scale;
+  dst.width  = Math.max(1, Math.round(src.width  * scale));
+  dst.height = Math.max(1, Math.round(src.height * scale));
   const ctx  = dst.getContext('2d');
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(src, 0, 0, dst.width, dst.height);
