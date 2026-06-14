@@ -1,6 +1,17 @@
 // js/collection.js
 // ─────────────────────────────────────────────────────────────
 // Collection CRUD, rendering (grid + list), item detail modal
+//
+// FIXES:
+//   - saveItem: scopes [data-field] query to #modal-add to avoid
+//     grabbing unrelated page inputs.
+//   - saveItem: strips Firestore Timestamp objects from dateAdded
+//     before saving so re-saves don't corrupt the field.
+//   - saveItem: calls rebuildArtistIndex() after a successful save
+//     so the Artists tab stays in sync.
+//   - renderCollection: more robust date sorting that handles plain
+//     Timestamp-shaped objects {seconds,nanoseconds} that can appear
+//     when an item was re-saved without proper Timestamp conversion.
 // ─────────────────────────────────────────────────────────────
 
 import { _state, MEDIA_TYPES, FIELD_LABELS } from './state.js';
@@ -16,20 +27,40 @@ export async function saveItem() {
   if (!_state.selectedType) { toast('Please select a media type', 'error'); return; }
 
   const isEdit = Boolean(_state.editingItem?.id);
+
+  // FIX: Safely resolve dateAdded — if we loaded the item from Firestore via onSnapshot,
+  // dateAdded is a Firestore Timestamp. JSON.parse(JSON.stringify(...)) turns it into a
+  // plain object {seconds, nanoseconds} which is NOT a valid Timestamp. We detect both
+  // forms and convert back to a usable ISO string so storage is always consistent.
+  let existingDateAdded = _state.editingItem?.dateAdded || null;
+  if (existingDateAdded) {
+    if (typeof existingDateAdded?.toDate === 'function') {
+      // Real Firestore Timestamp
+      existingDateAdded = existingDateAdded.toDate().toISOString();
+    } else if (typeof existingDateAdded === 'object' && existingDateAdded.seconds != null) {
+      // Serialised Timestamp shape {seconds, nanoseconds}
+      existingDateAdded = new Date(existingDateAdded.seconds * 1000).toISOString();
+    }
+    // Otherwise it's already an ISO string — leave it
+  }
+
   const item = {
     id:        isEdit ? _state.editingItem.id : 'i' + Date.now(),
     type:      _state.selectedType.id,
     typeLabel: _state.selectedType.label,
     icon:      _state.selectedType.icon,
-    dateAdded: _state.editingItem?.dateAdded || new Date().toISOString(),
+    dateAdded: existingDateAdded || new Date().toISOString(),
     coverData: _state.editingItem._coverData || null,
     fields:    {},
     comicTags: JSON.parse(JSON.stringify(_comicTagSelected)),
     source:    _state.lookupResult?.source || _state.editingItem?.source || 'manual',
   };
 
-  // Collect all [data-field] inputs
-  document.querySelectorAll('[data-field]').forEach(el => {
+  // FIX: Scope the [data-field] query to the modal so we don't accidentally
+  // pick up any other inputs that happen to use the same attribute on the page.
+  const modalEl = document.getElementById('modal-add');
+  const fieldEls = (modalEl || document).querySelectorAll('[data-field]');
+  fieldEls.forEach(el => {
     if (el.dataset.field) item.fields[el.dataset.field] = el.value || '';
   });
 
@@ -58,6 +89,10 @@ export async function saveItem() {
   toast('Added to your collection!', 'success');
   resetComicTags();
   _state.lookupResult = null;
+
+  // FIX: Keep the Artists tab in sync after every save.
+  // Use dynamic import to avoid circular deps; catches any failure silently.
+  import('./artist.js').then(m => m.rebuildArtistIndex()).catch(() => {});
 }
 window.saveItem = saveItem;
 
@@ -77,13 +112,14 @@ export async function deleteItem() {
   closeModal('modal-detail');
   renderCollection();
   toast('Item removed', 'success');
+
+  // Keep artist index in sync after deletion too
+  import('./artist.js').then(m => m.rebuildArtistIndex()).catch(() => {});
 }
 window.deleteItem = deleteItem;
 
 // ═══════════════════════════════════════════════════════════════
 // GRID / LIST TOGGLE
-// FIX: renamed from setView → setCollectionView to avoid clashing
-// with old HTML `setView('login')` navigation calls.
 // ═══════════════════════════════════════════════════════════════
 
 export function setCollectionView(v) {
@@ -126,10 +162,17 @@ export function renderCollection() {
       case 'condition':return (fa.condition || '').localeCompare(fb.condition || '');
       case 'type':     return a.typeLabel.localeCompare(b.typeLabel);
       default: {
-        // Handle Firestore Timestamps (.toDate()) vs ISO strings
-        const dateA = a.dateAdded?.toDate ? a.dateAdded.toDate() : new Date(a.dateAdded || 0);
-        const dateB = b.dateAdded?.toDate ? b.dateAdded.toDate() : new Date(b.dateAdded || 0);
-        return dateB - dateA;
+        // FIX: Handle all three forms of dateAdded:
+        //   1. Firestore Timestamp with .toDate() method
+        //   2. Plain object {seconds, nanoseconds} from JSON round-trip
+        //   3. ISO string
+        const toDate = v => {
+          if (!v) return new Date(0);
+          if (typeof v.toDate === 'function') return v.toDate();
+          if (typeof v === 'object' && v.seconds != null) return new Date(v.seconds * 1000);
+          return new Date(v);
+        };
+        return toDate(b.dateAdded) - toDate(a.dateAdded);
       }
     }
   });

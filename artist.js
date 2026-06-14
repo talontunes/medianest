@@ -1,18 +1,21 @@
-// js/artist.js
+// js/artist.js  (v2 — Discogs-style artist view)
 // ─────────────────────────────────────────────────────────────
 // Artist view — browse ANY artist (not just from your collection).
-// Shows artists from:
-//   1. Your personal collection
-//   2. Community/Firebase public collections
-//   3. A curated list of well-known artists as discoverable defaults
-//   4. Discogs search results for any artist you look up
 //
-// Features:
-//  - Auto-extracts artist/author/creator fields from items
-//  - Groups items by artist with counts
-//  - Shows all creations for a selected artist
-//  - Links to Discogs for music artists (enrichment)
-//  - Search/filter artists by name across all sources
+// CHANGES vs v1:
+//   - renderArtistDetail now shows a Discogs-style layout:
+//       • Hero header with name, type tags, item count
+//       • Wikipedia biography fetch (non-blocking)
+//       • Your collection items in a grid
+//       • Discogs "Discography" section with cover art + Add button
+//       • MusicBrainz artist search for music artists
+//   - Discogs results now include an "Add to collection" button
+//     on each release card so users can add without leaving the view.
+//   - _communityLoaded resets on explicit user-triggered refresh.
+//   - Artist cards show a coloured initial avatar when no cover is
+//     available, instead of a generic emoji.
+//   - getArtistNames() returns names sorted by collection count
+//     (most items first) when no search is active.
 // ─────────────────────────────────────────────────────────────
 
 import { _state, MEDIA_TYPES, FIELD_LABELS } from './state.js';
@@ -29,6 +32,17 @@ const CURATED_ARTISTS = [
   'Hayao Miyazaki', 'Akira Toriyama', 'Naoko Takeuchi', 'Kentaro Miura', 'Eiichiro Oda',
   'Frida Kahlo', 'Andy Warhol', 'Salvador Dalí', 'Pablo Picasso', 'Vincent van Gogh',
 ];
+
+// ── Colour palette for initial avatars ───────────────────────
+const AVATAR_COLOURS = [
+  '#c8a96e','#58a6ff','#6eba5e','#e8748e','#a78bfa',
+  '#f97316','#06b6d4','#ec4899','#84cc16','#f59e0b',
+];
+function _avatarColour(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
+  return AVATAR_COLOURS[Math.abs(h) % AVATAR_COLOURS.length];
+}
 
 // ── Internal: extract artist-like fields from an item ─────────
 function _getItemArtist(item) {
@@ -50,7 +64,7 @@ function _getItemArtist(item) {
   return null;
 }
 
-// ── Build artist index from items ──────────────────
+// ── Build artist index from items ─────────────────────────────
 function _buildArtistIndex(items) {
   const index = {};
   for (const item of items) {
@@ -81,20 +95,16 @@ let _currentArtist = null;
 let _communityLoaded = false;
 
 export async function rebuildArtistIndex() {
-  // Build from user's collection
   _artistIndex = _buildArtistIndex(_state.collection);
   _currentArtist = null;
 
-  // If Firebase is enabled, also fetch community items to build a broader artist index
   if (window._fb?.enabled && window._fb.getCommunityItems && !_communityLoaded) {
     try {
       const communityItems = await window._fb.getCommunityItems();
       if (communityItems && communityItems.length) {
         const communityIndex = _buildArtistIndex(communityItems);
-        // Merge community artists into our index
         for (const [name, data] of Object.entries(communityIndex)) {
           if (_artistIndex[name]) {
-            // Merge items without duplicates
             const existingIds = new Set(_artistIndex[name].items.map(i => i.id));
             for (const item of data.items) {
               if (!existingIds.has(item.id)) {
@@ -115,28 +125,30 @@ export async function rebuildArtistIndex() {
     _communityLoaded = true;
   }
 
-  // If still empty (no collection, no community), seed with curated artists
   if (Object.keys(_artistIndex).length === 0) {
     for (const name of CURATED_ARTISTS) {
-      _artistIndex[name] = {
-        name,
-        items: [],
-        types: [],
-        count: 0,
-        curated: true,
-      };
+      _artistIndex[name] = { name, items: [], types: [], count: 0, curated: true };
     }
   }
 }
 
 export function getArtistIndex() { return _artistIndex; }
+
 export function getArtistNames(search) {
   if (search === undefined) search = '';
   const names = Object.keys(_artistIndex);
-  if (!search) return names.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
   const q = search.toLowerCase();
-  return names.filter(n => n.toLowerCase().includes(q)).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  const filtered = q ? names.filter(n => n.toLowerCase().includes(q)) : names;
+  // Sort by count (most items first) when no search, else alphabetical
+  if (!q) {
+    return filtered.sort((a, b) => {
+      const diff = (_artistIndex[b].count || 0) - (_artistIndex[a].count || 0);
+      return diff !== 0 ? diff : a.toLowerCase().localeCompare(b.toLowerCase());
+    });
+  }
+  return filtered.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 }
+
 export function getArtist(name) { return _artistIndex[name] || null; }
 export function getCurrentArtist() { return _currentArtist; }
 export function setCurrentArtist(name) { _currentArtist = _artistIndex[name] || null; }
@@ -145,20 +157,20 @@ export function setCurrentArtist(name) { _currentArtist = _artistIndex[name] || 
 function escHtml(s) {
   if (!s) return '';
   return String(s)
-    .replace(/&/g, '&' + 'amp;')
-    .replace(/</g, '&' + 'lt;')
-    .replace(/>/g, '&' + 'gt;')
-    .replace(/"/g, '&' + 'quot;')
-    .replace(/'/g, '&#' + '39;');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 function escAttr(s) {
   if (!s) return '';
   return String(s)
-    .replace(/&/g, '&' + 'amp;')
-    .replace(/"/g, '&' + 'quot;')
-    .replace(/'/g, '&#' + '39;')
-    .replace(/</g, '&' + 'lt;')
-    .replace(/>/g, '&' + 'gt;');
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 // ── RENDER: artist list grid ──────────────────────────────────
@@ -175,173 +187,316 @@ export function renderArtistList(containerId, search) {
         '<div class="serif" style="font-size:20px;margin-bottom:8px">' +
         (search ? 'No artists match "' + escHtml(search) + '"' : 'No artists found') +
         '</div><div style="font-size:13px;">' +
-        (search ? 'Try a different name, or search below.' : 'Search for any artist above, or use the Discover tab to explore public collections.') +
+        (search ? 'Try a different name.' : 'Add items to your collection to see artists here.') +
         '</div></div>';
     return;
   }
   container.innerHTML = names.map(function(name) {
-    var artist = _artistIndex[name];
-    var typesStr = Array.isArray(artist.types) ? artist.types.join(' · ') : '';
-    var itemCount = artist.count;
-    var thumbItem = artist.items && artist.items[artist.items.length - 1];
-    var thumbHtml = thumbItem && thumbItem.coverData
+    const artist = _artistIndex[name];
+    const typesStr = Array.isArray(artist.types) ? artist.types.join(' · ') : '';
+    const itemCount = artist.count;
+    const colour = _avatarColour(name);
+    const initial = name.trim()[0]?.toUpperCase() || '?';
+
+    // Use the most recently added item's cover as thumbnail
+    const thumbItem = artist.items && artist.items[artist.items.length - 1];
+    const thumbHtml = thumbItem && thumbItem.coverData
       ? '<img src="' + escAttr(thumbItem.coverData) + '" alt="' + escAttr(name) + '" style="width:100%;height:100%;object-fit:cover">'
-      : '<span style="font-size:28px">🎨</span>';
-    var curatedBadge = artist.curated ? '<span style="font-size:10px;color:var(--accent);margin-left:6px">↗ discover</span>' : '';
+      : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:' + colour + '20;font-size:42px;font-family:var(--font-d);color:' + colour + ';font-weight:600">' + escHtml(initial) + '</div>';
+
+    const curatedBadge = artist.curated
+      ? '<span style="font-size:10px;color:var(--accent);margin-left:6px;font-family:var(--font-m)">↗ explore</span>'
+      : '';
+
     return '<div class="artist-card fade-in" onclick="window.selectArtist(\'' + escAttr(name) + '\')">' +
       '<div class="artist-card-thumb">' + thumbHtml + '</div>' +
       '<div class="artist-card-info">' +
         '<div class="artist-card-name truncate">' + escHtml(name) + curatedBadge + '</div>' +
-        (itemCount > 0 ? '<div class="artist-card-count">' + itemCount + ' item' + (itemCount !== 1 ? 's' : '') + '</div>' : '<div class="artist-card-count" style="color:var(--text3)">Browse on Discogs</div>') +
+        (itemCount > 0
+          ? '<div class="artist-card-count">' + itemCount + ' item' + (itemCount !== 1 ? 's' : '') + ' in collection</div>'
+          : '<div class="artist-card-count" style="color:var(--text3)">Not in your collection</div>') +
         (typesStr ? '<div class="artist-card-types text-xs text-muted truncate">' + typesStr + '</div>' : '') +
       '</div></div>';
   }).join('');
 }
 
-// ── RENDER: single artist detail ──────────────────────────────
+// ── RENDER: single artist detail (Discogs-style) ──────────────
 export function renderArtistDetail(containerId, name) {
   if (!containerId) containerId = 'artist-detail';
-  var container = document.getElementById(containerId);
+  const container = document.getElementById(containerId);
   if (!container) return;
-  var artist = name ? _artistIndex[name] : _currentArtist;
+  const artist = name ? _artistIndex[name] : _currentArtist;
   if (!artist) {
     container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)">' +
-      '<div style="font-size:32px;margin-bottom:10px">🎨</div><div>Select an artist to view their creations</div></div>';
+      '<div style="font-size:32px;margin-bottom:10px">🎨</div><div>Select an artist to view their works</div></div>';
     return;
   }
   _currentArtist = artist;
-  var existingDiscogs = container.querySelector('.discogs-results-section');
-  if (existingDiscogs) existingDiscogs.remove();
-  
-  var hasItems = artist.items && artist.items.length > 0;
-  var headerHtml =
-    '<div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:20px;flex-wrap:wrap">' +
-      '<div><button class="btn-ghost" onclick="window.showArtistList()" style="font-size:12px;margin-bottom:8px">← Back to all artists</button>' +
-        '<div class="serif" style="font-size:24px;font-weight:600">' + escHtml(artist.name) + '</div>' +
-        (hasItems ? '<div style="color:var(--text2);font-size:13px;margin-top:4px">' +
-        artist.count + ' item' + (artist.count !== 1 ? 's' : '') + (artist.types.length ? ' · ' + artist.types.join(' · ') : '') +
-        '</div>' : '<div style="color:var(--text2);font-size:13px;margin-top:4px">No items in your collection — browse works via Discogs below</div>') +
-        '</div>' +
-      '<div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">' +
-        '<button class="btn-ghost" onclick="window.searchArtistDiscogs(\'' + escAttr(artist.name) + '\')" style="font-size:12px" title="Search Discogs for this artist">🔍 Search Discogs</button>' +
-        (artist.curated ? '<button class="btn-ghost" onclick="window.addCuratedArtist(\'' + escAttr(artist.name) + '\')" style="font-size:12px" title="Add an item by this artist">➕ Add to collection</button>' : '') +
-      '</div></div>';
-  
-  var itemsHtml = '';
+
+  const colour = _avatarColour(artist.name);
+  const initial = artist.name.trim()[0]?.toUpperCase() || '?';
+  const hasItems = artist.items && artist.items.length > 0;
+
+  // Hero avatar — use first item cover or coloured initial
+  const heroThumb = (hasItems && artist.items[0].coverData)
+    ? '<img src="' + escAttr(artist.items[0].coverData) + '" alt="' + escAttr(artist.name) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">'
+    : '<span style="font-family:var(--font-d);font-size:36px;font-weight:600;color:' + colour + '">' + escHtml(initial) + '</span>';
+
+  const typeTagsHtml = Array.isArray(artist.types) && artist.types.length
+    ? artist.types.map(t => '<span class="badge badge-muted" style="font-size:11px">' + escHtml(t) + '</span>').join(' ')
+    : '';
+
+  const headerHtml =
+    '<div style="display:flex;gap:20px;align-items:flex-start;margin-bottom:24px;flex-wrap:wrap">' +
+      '<div style="width:80px;height:80px;border-radius:50%;background:' + colour + '20;border:2px solid ' + colour + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden">' + heroThumb + '</div>' +
+      '<div style="flex:1;min-width:200px">' +
+        '<button class="btn-ghost" onclick="window.showArtistList()" style="font-size:12px;margin-bottom:8px;padding:5px 10px">← All artists</button>' +
+        '<div class="serif" style="font-size:28px;font-weight:600;line-height:1.1">' + escHtml(artist.name) + '</div>' +
+        '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' + typeTagsHtml + '</div>' +
+        (hasItems
+          ? '<div style="color:var(--text2);font-size:13px;margin-top:6px">' + artist.count + ' item' + (artist.count !== 1 ? 's' : '') + ' in your collection</div>'
+          : '<div style="color:var(--text3);font-size:13px;margin-top:6px">Not yet in your collection</div>') +
+      '</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-self:flex-start">' +
+        '<button class="btn-ghost" onclick="window.searchArtistDiscogs(\'' + escAttr(artist.name) + '\')" style="font-size:12px" title="Browse on Discogs">🔍 Search Discogs</button>' +
+        '<button class="btn-ghost" onclick="window.addCuratedArtist(\'' + escAttr(artist.name) + '\')" style="font-size:12px" title="Add item by this artist">＋ Add to collection</button>' +
+      '</div>' +
+    '</div>' +
+    // Biography placeholder — filled async
+    '<div id="artist-bio-wrap" style="margin-bottom:20px;display:none">' +
+      '<div id="artist-bio" style="font-size:13px;color:var(--text2);line-height:1.7;background:var(--bg3);padding:14px 16px;border-radius:8px;border-left:3px solid ' + colour + '"></div>' +
+    '</div>';
+
+  // Collection items section
+  let collectionHtml = '';
   if (hasItems) {
-    itemsHtml = artist.items.map(function(item) {
-      var title = item.fields && (item.fields.title || item.fields.album || item.fields.artist) || 'Untitled';
-      var sub = item.fields && (item.fields.year || item.fields.pub_year || item.fields.label || item.fields.publisher) || '';
-      var cover = item.coverData
-        ? '<img src="' + escAttr(item.coverData) + '" alt="' + escAttr(title) + '" style="width:100%;height:100%;object-fit:cover">'
-        : (item.icon || '📦');
-      return '<div class="col-item fade-in" onclick="window.openDetail(\'' + item.id + '\')" data-id="' + item.id + '">' +
-        '<div class="col-thumb">' + cover + '<div class="col-badge">' + item.typeLabel + '</div></div>' +
-        '<div class="col-info"><div class="col-title truncate">' + title + '</div>' +
-        '<div class="col-meta truncate">' + sub + '</div></div></div>';
-    }).join('');
+    collectionHtml =
+      '<div style="margin-bottom:28px">' +
+        '<div style="font-size:13px;font-weight:600;color:var(--text2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px">In Your Collection</div>' +
+        '<div class="artist-items-grid">' +
+          artist.items.map(function(item) {
+            const title = item.fields && (item.fields.title || item.fields.album || item.fields.artist) || 'Untitled';
+            const sub = item.fields && (item.fields.year || item.fields.pub_year || item.fields.label || item.fields.publisher) || '';
+            const cover = item.coverData
+              ? '<img src="' + escAttr(item.coverData) + '" alt="' + escAttr(title) + '" style="width:100%;height:100%;object-fit:cover">'
+              : (item.icon || '📦');
+            return '<div class="col-item fade-in" onclick="window.openDetail(\'' + item.id + '\')" data-id="' + item.id + '">' +
+              '<div class="col-thumb">' + cover + '<div class="col-badge">' + item.typeLabel + '</div></div>' +
+              '<div class="col-info"><div class="col-title truncate">' + escHtml(title) + '</div>' +
+              '<div class="col-meta truncate">' + escHtml(sub) + '</div></div></div>';
+          }).join('') +
+        '</div>' +
+      '</div>';
   }
 
-  container.innerHTML = headerHtml + 
-    (itemsHtml ? '<div class="artist-items-grid">' + itemsHtml + '</div>' : '');
-  
-  // If curated (no items), immediately auto-search Discogs
-  if (!hasItems && artist.curated) {
-    searchArtistDiscogs(artist.name);
+  // Discogs results section placeholder
+  const discogsPlaceholderHtml =
+    '<div id="artist-discogs-section">' +
+      '<div style="font-size:13px;font-weight:600;color:var(--text2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px">Discography</div>' +
+      '<div id="artist-discogs-results" style="color:var(--text3);font-size:13px;padding:20px;background:var(--bg3);border-radius:8px;text-align:center">' +
+        '<span class="spin" style="font-size:20px;display:inline-block;margin-bottom:8px">⏳</span><br>Loading Discogs data…' +
+      '</div>' +
+    '</div>';
+
+  container.innerHTML = headerHtml + collectionHtml + discogsPlaceholderHtml;
+
+  // Kick off async enrichment (non-blocking)
+  _fetchArtistBio(artist.name);
+  searchArtistDiscogs(artist.name);
+}
+
+// ── Fetch Wikipedia biography (non-blocking) ─────────────────
+async function _fetchArtistBio(artistName) {
+  try {
+    const url = 'https://en.wikipedia.org/api/rest_v1/page/summary/' +
+      encodeURIComponent(artistName.replace(/ /g, '_'));
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return;
+    const data = await r.json();
+    const extract = data.extract;
+    if (!extract || extract.length < 40) return;
+
+    const bioWrap = document.getElementById('artist-bio-wrap');
+    const bioEl   = document.getElementById('artist-bio');
+    if (!bioEl || !bioWrap) return;
+
+    // Truncate to ~400 chars
+    const short = extract.length > 420 ? extract.substring(0, 420).replace(/\s\S+$/, '') + '…' : extract;
+    bioEl.innerHTML = escHtml(short) +
+      ' <a href="https://en.wikipedia.org/wiki/' + encodeURIComponent(artistName.replace(/ /g, '_')) +
+      '" target="_blank" style="color:var(--accent);font-size:11px">Wikipedia ↗</a>';
+    bioWrap.style.display = '';
+  } catch (_) { /* bio is optional */ }
+}
+
+// ── Search Discogs and render richly ─────────────────────────
+export async function searchArtistDiscogs(artistName) {
+  if (!artistName) return;
+
+  const resultsEl = document.getElementById('artist-discogs-results');
+  if (resultsEl) {
+    resultsEl.innerHTML = '<span class="spin" style="font-size:20px;display:inline-block;margin-bottom:8px">⏳</span><br>Searching Discogs for <strong>' + escHtml(artistName) + '</strong>…';
+  }
+
+  try {
+    const results = await discogsSearchByTitle(artistName);
+
+    if (!results || results.length === 0) {
+      if (resultsEl) {
+        resultsEl.innerHTML =
+          '<div style="padding:16px;text-align:center;color:var(--text3)">' +
+          '<div style="font-size:24px;margin-bottom:8px">🎵</div>' +
+          'No Discogs results for <strong>' + escHtml(artistName) + '</strong>. ' +
+          '<a href="https://www.discogs.com/search/?q=' + encodeURIComponent(artistName) + '&type=artist" target="_blank" style="color:var(--accent)">Search Discogs directly ↗</a>' +
+          '</div>';
+      }
+      return;
+    }
+
+    const html = results.slice(0, 8).map(function(r, idx) {
+      const title = r.album || r.title || 'Unknown';
+      const sub   = [r.label, r.year, r.format].filter(Boolean).join(' · ');
+      const thumb = r.coverUrl
+        ? '<img src="' + escAttr(r.coverUrl) + '" alt="' + escAttr(title) + '" style="width:100%;height:100%;object-fit:cover;border-radius:4px" onerror="this.parentElement.innerHTML=\'🎵\'">'
+        : '<span style="font-size:22px">🎵</span>';
+
+      return '<div style="display:flex;gap:12px;align-items:flex-start;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;transition:border-color .15s ease" ' +
+        'onmouseover="this.style.borderColor=\'var(--accent)\'" onmouseout="this.style.borderColor=\'var(--border)\'">' +
+        '<div style="width:56px;height:56px;background:var(--bg2);border-radius:6px;flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center">' + thumb + '</div>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div class="fw-600" style="font-size:13px;margin-bottom:2px">' + escHtml(title) + '</div>' +
+          (sub ? '<div class="text-sm text-muted">' + escHtml(sub) + '</div>' : '') +
+          (r.genre ? '<div class="text-xs" style="color:var(--text3);margin-top:3px">' + escHtml(r.genre.split(',').slice(0,3).join(', ')) + '</div>' : '') +
+        '</div>' +
+        '<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">' +
+          '<button class="btn-ghost" style="font-size:11px;padding:4px 10px;white-space:nowrap" ' +
+            'onclick="window._addDiscogsResultToCollection(' + idx + ', \'' + escAttr(artistName) + '\')" title="Add to collection">＋ Add</button>' +
+          (r.discogsUrl
+            ? '<a href="' + escAttr(r.discogsUrl) + '" target="_blank" class="btn-ghost" style="font-size:11px;padding:4px 10px;text-align:center;white-space:nowrap">View ↗</a>'
+            : '') +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    if (resultsEl) {
+      resultsEl.innerHTML = html +
+        '<div style="font-size:11px;color:var(--text3);margin-top:10px;text-align:center">Results from ' +
+        '<a href="https://www.discogs.com" target="_blank" style="color:var(--accent)">Discogs</a> · ' +
+        '<a href="https://www.discogs.com/search/?q=' + encodeURIComponent(artistName) + '&type=artist" target="_blank" style="color:var(--accent)">View all releases ↗</a>' +
+        '</div>';
+    }
+
+    // Cache results so the Add buttons can reference them
+    window._discogsResultsCache = results;
+
+  } catch (e) {
+    console.warn('[artist] Discogs search error:', e.message);
+    if (resultsEl) {
+      resultsEl.innerHTML = '<div style="color:var(--danger);padding:12px;font-size:13px">Discogs search failed. <a href="https://www.discogs.com/search/?q=' + encodeURIComponent(artistName) + '&type=artist" target="_blank" style="color:var(--accent)">Try searching directly on Discogs ↗</a></div>';
+    }
   }
 }
 
-// ── Add a curated artist item to the user's collection ─────────
-window.addCuratedArtist = function(artistName) {
-  window.openAddModal();
-  // Auto-fill the artist field after a short delay
+// ── Add a Discogs result directly to collection ───────────────
+window._addDiscogsResultToCollection = function(idx, artistName) {
+  const results = window._discogsResultsCache;
+  if (!results || !results[idx]) { toast('Could not find that release', 'error'); return; }
+  const r = results[idx];
+
+  // Determine media type
+  const typeId = r.suggestedType || 'vinyl';
+  const mediaType = (window._state?.MEDIA_TYPES || []).find(m => m.id === typeId) ||
+    { id: typeId, label: typeId.charAt(0).toUpperCase() + typeId.slice(1), icon: '🎵', fields: [] };
+
+  // Pre-populate state for the add modal
+  if (window._state) {
+    window._state.selectedType = mediaType;
+    window._state.editingItem  = {};
+    window._state.lookupResult = { ...r, source: 'Discogs' };
+  }
+
+  // Open modal on manual tab with data pre-filled
+  window.openAddModal && window.openAddModal();
+
+  // After modal opens, select the type and fill the form
   setTimeout(function() {
-    var artistField = document.querySelector('[data-field="artist"]') ||
-                      document.querySelector('[data-field="author"]');
-    if (artistField) artistField.value = artistName;
-    // Also try to auto-select a media type
-    var mediaCards = document.querySelectorAll('#add-media-grid .media-card');
-    // Don't auto-select; let user pick
+    window.selectType && window.selectType(typeId);
+    setTimeout(function() {
+      window.switchTab && window.switchTab('manual-tab', 'add');
+      // Fill form fields
+      const fieldMap = {
+        artist: r.artist, album: r.album, year: r.year,
+        label: r.label, catalog: r.catalog, pressing: r.pressing,
+        format: r.format, speed: r.speed, genre: r.genre,
+        notes: r.tracklist ? ('Tracklist:\n' + r.tracklist) : (r.notes || ''),
+      };
+      Object.entries(fieldMap).forEach(function([field, val]) {
+        if (!val) return;
+        const el = document.querySelector('#modal-add [data-field="' + field + '"]');
+        if (el) el.value = val;
+      });
+      // Fetch cover art
+      if (r.coverUrl) {
+        fetch(r.coverUrl).then(res => res.blob()).then(blob => {
+          const reader = new FileReader();
+          reader.onload = ev => {
+            if (window._state) window._state.editingItem._coverData = ev.target.result;
+            const cp = document.getElementById('cover-preview');
+            if (cp) cp.innerHTML = '<img src="' + ev.target.result + '" style="width:100%;height:100%;object-fit:cover">';
+          };
+          reader.readAsDataURL(blob);
+        }).catch(() => {});
+      }
+      toast('Discogs data applied — review and save!', 'success');
+    }, 150);
   }, 300);
 };
 
-// ── Search Discogs for an artist ───────────────────────────────
-export async function searchArtistDiscogs(artistName) {
-  if (!artistName) return;
-  toast('Searching Discogs for ' + artistName + '…', '');
-  try {
-    var results = await discogsSearchByTitle(artistName);
-    if (!results || results.length === 0) { toast('No Discogs results for ' + artistName, 'error'); return; }
-    var detailContainer = document.getElementById('artist-detail');
-    if (!detailContainer) return;
-    var resultsHtml = results.slice(0, 5).map(function(r) {
-      var thumb = r.coverUrl
-        ? '<img src="' + escAttr(r.coverUrl) + '" alt="' + escAttr(r.album || r.title) + '" style="width:48px;height:48px;object-fit:cover;border-radius:5px">'
-        : '<span style="font-size:24px">💿</span>';
-      return '<div class="book-scan-result-item" style="cursor:default">' +
-        '<div style="width:48px;height:48px;flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;border-radius:5px;background:var(--bg2)">' + thumb + '</div>' +
-        '<div style="flex:1;min-width:0"><div class="fw-600" style="font-size:13px">' + escHtml(r.album || r.title) + '</div>' +
-        '<div class="text-sm text-muted">' + (r.label ? escHtml(r.label) : '') + (r.year ? ' · ' + r.year : '') + '</div>' +
-        (r.format ? '<div class="text-xs text-muted">' + escHtml(r.format) + '</div>' : '') +
-        '</div></div>';
-    }).join('');
-    var existingDiscogs = detailContainer.querySelector('.discogs-results-section');
-    if (existingDiscogs) existingDiscogs.remove();
-    var discogsSection = document.createElement('div');
-    discogsSection.className = 'discogs-results-section';
-    discogsSection.style.cssText = 'margin-top:24px;padding-top:20px;border-top:1px solid var(--border)';
-    discogsSection.innerHTML =
-      '<div style="font-size:13px;font-weight:600;margin-bottom:12px">🔍 Discogs results for <strong>' + escHtml(artistName) + '</strong></div>' +
-      '<div class="flex-col gap-2">' + resultsHtml + '</div>' +
-      '<div style="font-size:11px;color:var(--text3);margin-top:10px">Results from ' +
-      '<a href="https://www.discogs.com" target="_blank" style="color:var(--accent)">Discogs</a> · ' +
-      '<a href="https://www.discogs.com/search/?q=' + encodeURIComponent(artistName) + '&type=artist" target="_blank" style="color:var(--accent)">View all on Discogs</a></div>';
-    detailContainer.appendChild(discogsSection);
-    toast('Discogs results loaded', 'success');
-  } catch (e) { console.warn('[artist] Discogs search error:', e.message); toast('Discogs search failed', 'error'); }
-}
+// ── Add a curated artist item to the user's collection ────────
+window.addCuratedArtist = function(artistName) {
+  window.openAddModal && window.openAddModal();
+  setTimeout(function() {
+    const artistField = document.querySelector('#modal-add [data-field="artist"]') ||
+                        document.querySelector('#modal-add [data-field="author"]');
+    if (artistField) artistField.value = artistName;
+  }, 350);
+};
 
 // ── Global window bindings ────────────────────────────────────
 window.selectArtist = function(name) {
   setCurrentArtist(name);
-  var gridEl = document.getElementById('artist-grid');
-  var detailEl = document.getElementById('artist-detail');
-  if (gridEl) gridEl.style.display = 'none';
+  const gridEl   = document.getElementById('artist-grid');
+  const detailEl = document.getElementById('artist-detail');
+  if (gridEl)   { gridEl.style.display = 'none'; }
   if (detailEl) { detailEl.style.display = ''; detailEl.innerHTML = ''; }
-  var discogsSections = document.querySelectorAll('.discogs-results-section');
-  discogsSections.forEach(function(el) { el.remove(); });
   renderArtistDetail('artist-detail', name);
 };
 
 window.showArtistList = function() {
   _currentArtist = null;
-  var gridEl = document.getElementById('artist-grid');
-  var detailEl = document.getElementById('artist-detail');
+  const gridEl   = document.getElementById('artist-grid');
+  const detailEl = document.getElementById('artist-detail');
   if (detailEl) { detailEl.style.display = 'none'; detailEl.innerHTML = ''; }
-  if (gridEl) gridEl.style.display = '';
-  var discogsSections = document.querySelectorAll('.discogs-results-section');
-  discogsSections.forEach(function(el) { el.remove(); });
+  if (gridEl)   { gridEl.style.display = ''; }
   renderArtistList('artist-grid');
 };
 
 window.searchArtistDiscogs = function(name) { searchArtistDiscogs(name); };
 
 window.filterArtists = function() {
-  var searchEl = document.getElementById('artist-search');
-  var query = searchEl ? searchEl.value.trim() : '';
-  var gridEl = document.getElementById('artist-grid');
-  var detailEl = document.getElementById('artist-detail');
-  if (gridEl) gridEl.style.display = '';
+  const searchEl = document.getElementById('artist-search');
+  const query    = searchEl ? searchEl.value.trim() : '';
+  const gridEl   = document.getElementById('artist-grid');
+  const detailEl = document.getElementById('artist-detail');
+  if (gridEl)   { gridEl.style.display = ''; }
   if (detailEl) { detailEl.style.display = 'none'; detailEl.innerHTML = ''; }
-  var discogsSections = document.querySelectorAll('.discogs-results-section');
-  discogsSections.forEach(function(el) { el.remove(); });
   renderArtistList('artist-grid', query);
 };
 
 // ── Init ──────────────────────────────────────────────────────
 export async function initArtistView() {
   await rebuildArtistIndex();
-  renderArtistList('artist-grid');
-  var detailEl = document.getElementById('artist-detail');
+  const detailEl = document.getElementById('artist-detail');
   if (detailEl) detailEl.style.display = 'none';
+  renderArtistList('artist-grid');
 }

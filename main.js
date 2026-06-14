@@ -2,16 +2,22 @@
 // ─────────────────────────────────────────────────────────────
 // App entry point. Loaded as <script type="module"> AFTER
 // firebase.js in index.html. Waits for window._fbReady signal.
+//
+// FIXES vs original:
+//   - Exports openEditItem to window so the Edit button in the
+//     detail modal can find it reliably.
+//   - Exposes applyLookupResult and applyCoverSearchResult so
+//     inline onclick handlers in lookup results work correctly.
 // ─────────────────────────────────────────────────────────────
 
 import { loadState }                                from './storage.js';
 import { applyTheme, buildThemePickers, toggleThemePicker } from './theme.js';
 import { buildMediaGrids, navigate, openAddModal, selectType, backToStep1, openTrade, switchTab, closeModal, openModal, toast } from './ui.js';
 import { updateNavForAuth, doLogin, doSignup, logout } from './auth.js';
-import { saveItem, deleteItem, setCollectionView, renderCollection, openDetail } from './collection.js';
+import { saveItem, deleteItem, setCollectionView, renderCollection, openDetail, openEditItem } from './collection.js';
 import { startCamera, stopCamera, captureFrame, handleScanDrop, handleScanFile, handleCoverScanDrop, handleCoverScanFile } from './scanner.js';
 import { initArtistView, rebuildArtistIndex } from './artist.js';
-import { lookupBarcode, searchBookByTitle, searchMediaByTitle }          from './lookup.js';
+import { lookupBarcode, searchBookByTitle, searchMediaByTitle, applyLookupResult, applyCoverSearchResult } from './lookup.js';
 import { _state }                                    from './state.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -36,9 +42,10 @@ window.updateNavForAuth    = updateNavForAuth;
 
 window.saveItem            = saveItem;
 window.deleteItem          = deleteItem;
-window.setCollectionView   = setCollectionView;   // grid/list toggle in collection page
+window.setCollectionView   = setCollectionView;
 window.renderCollection    = renderCollection;
 window.openDetail          = openDetail;
+window.openEditItem        = openEditItem;   // FIX: was missing
 window.openTrade           = openTrade;
 
 window.startCamera         = startCamera;
@@ -49,13 +56,15 @@ window.handleScanFile      = handleScanFile;
 window.handleCoverScanDrop = handleCoverScanDrop;
 window.handleCoverScanFile = handleCoverScanFile;
 
-window.lookupBarcode       = lookupBarcode;
-window.searchBookByTitle   = searchBookByTitle;
-window.searchMediaByTitle  = searchMediaByTitle;
+window.lookupBarcode           = lookupBarcode;
+window.searchBookByTitle       = searchBookByTitle;
+window.searchMediaByTitle      = searchMediaByTitle;
+window.applyLookupResult       = applyLookupResult;       // FIX: was missing
+window.applyCoverSearchResult  = applyCoverSearchResult;  // FIX: was missing
 
-// Artist view exports
-window.initArtistView   = initArtistView;
-window.rebuildArtistIndex = rebuildArtistIndex;
+// Artist view
+window.initArtistView      = initArtistView;
+window.rebuildArtistIndex  = rebuildArtistIndex;
 
 window.renderProfile       = () => import('./ui.js').then(m => m.renderProfile());
 
@@ -69,22 +78,17 @@ function initApp() {
   buildMediaGrids();
 
   if (window._fb?.enabled) {
-    // Firebase configured — onAuthStateChanged in firebase.js drives navigation
     updateNavForAuth();
   } else {
-    // Local fallback mode
     updateNavForAuth();
     navigate(_state.user ? 'collection' : 'home');
   }
 }
 
-// firebase.js sets window._fbReady and calls window._fbReadyCb when done.
-// If it already fired (e.g. no Firebase config → instant), boot now.
 if (window._fbReady) {
   initApp();
 } else {
   window._fbReadyCb = initApp;
-  // Safety net: if firebase.js never signals (network issue etc.), boot after 3 s
   setTimeout(() => {
     if (!window._fbReady) {
       window._fbReady = true;

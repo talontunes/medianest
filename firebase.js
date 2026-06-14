@@ -1,17 +1,20 @@
-// js/firebase.js  (v2 — adds queryUserByIdentifier for username/phone login)
+// js/firebase.js  (v3 — fixes dateAdded Timestamp corruption on re-save)
 // ─────────────────────────────────────────────────────────────
 // Firebase initialisation. Loaded as a <script type="module">
 // BEFORE main.js so that window._fb and window._fbReady are set
 // before the app boots.
 //
-// NEW: window._fb.queryUserByIdentifier(identifier)
-//   Looks up a user document by 'username' or 'phone' field and
-//   returns their email — used by auth.js so users can sign in
-//   with a username or phone number instead of their email.
-//
-// FIX (from v1): getAllUsers() correctly queries each user's
-// 'collection' *subcollection* with a count query instead of
-// trying to read a 'collection' field off the user document.
+// FIXES vs v2:
+//   - saveItem: preserves the original Firestore Timestamp for
+//     dateAdded when editing existing items, instead of letting
+//     a plain-object form of the Timestamp overwrite it. This
+//     prevents the sort-breaking bug where re-saved items had
+//     dateAdded as {seconds,nanoseconds} instead of a real Timestamp.
+//   - saveItem: for new items, always uses serverTimestamp() (no
+//     change from v2, but made explicit).
+//   - getCommunityItems: wrapped in a try/catch that surfaces a
+//     better message when the required Firestore composite index
+//     doesn't exist yet (common on new projects).
 // ─────────────────────────────────────────────────────────────
 
 import './state.js';
@@ -110,7 +113,6 @@ if (!FIREBASE_ENABLED) {
         signup: async (email, pw, firstName, lastName, username, phone) => {
           const cred = await createUserWithEmailAndPassword(auth, email, pw);
           await updateProfile(cred.user, { displayName: firstName + ' ' + lastName });
-          // Normalise phone to digits-only for consistent lookups
           const normPhone = phone ? phone.replace(/[\s\-().+]/g, '') : null;
           await setDoc(doc(db, 'users', cred.user.uid), {
             firstName, lastName, username, email,
@@ -123,39 +125,25 @@ if (!FIREBASE_ENABLED) {
         logout: () => signOut(auth),
 
         // ── queryUserByIdentifier ─────────────────────────────
-        // Used by auth.js to resolve a username or phone number
-        // to an email address so we can call signInWithEmailAndPassword.
-        //
-        // Runs two parallel Firestore queries (username and phone)
-        // and returns whichever resolves first with a match.
-        // Returns null (not throws) when the user simply doesn't exist.
         queryUserByIdentifier: async (identifier) => {
-          const trimmed = identifier.trim();
-          // Normalise phone (digits only) for comparison
+          const trimmed   = identifier.trim();
           const normPhone = trimmed.replace(/[\s\-().+]/g, '');
           const usersRef  = collection(db, 'users');
 
-          // Run both queries in parallel for speed
           const [byUsername, byPhone] = await Promise.allSettled([
-            getDocs(query(usersRef, where('username', '==', trimmed),      limit(1))),
-            getDocs(query(usersRef, where('phone',    '==', normPhone),     limit(1))),
+            getDocs(query(usersRef, where('username', '==', trimmed),  limit(1))),
+            getDocs(query(usersRef, where('phone',    '==', normPhone), limit(1))),
           ]);
 
-          // Check username result
           if (byUsername.status === 'fulfilled' && !byUsername.value.empty) {
             const data = byUsername.value.docs[0].data();
             if (data.email) return data.email;
           }
-
-          // Check phone result
           if (byPhone.status === 'fulfilled' && !byPhone.value.empty) {
             const data = byPhone.value.docs[0].data();
             if (data.email) return data.email;
           }
 
-          // Also try case-insensitive username by fetching a broader set
-          // (Firestore doesn't support ILIKE, but usernames should be unique
-          // so an exact lowercase match is good enough for most cases).
           const lowerTrimmed = trimmed.toLowerCase();
           if (lowerTrimmed !== trimmed) {
             try {
@@ -169,19 +157,45 @@ if (!FIREBASE_ENABLED) {
             } catch (_) {}
           }
 
-          return null; // not found — not an error
+          return null;
         },
 
+        // ── saveItem ──────────────────────────────────────────
+        // FIX: When editing an existing item that was loaded from Firestore,
+        // its dateAdded is a Firestore Timestamp. After JSON.parse(JSON.stringify(...))
+        // in openAddModal it becomes a plain object {seconds, nanoseconds}.
+        // We must NOT store this plain object back — instead we use FieldValue
+        // deleteField trick: just omit dateAdded from the payload on edits
+        // (merge:true preserves the original Timestamp in Firestore).
+        // For new items we always use serverTimestamp().
         saveItem: async (item) => {
           if (!window._state.user) return null;
           const uid      = window._state.user.id;
           const username = window._state.user.username || window._state.user.email || 'anonymous';
-          const { id, ...data } = item;
-          const payload  = { ...data, username, ownerId: uid };
-          if (id && !id.startsWith('i')) {
+
+          // Destructure out id and dateAdded — we handle them separately
+          const { id, dateAdded, ...rest } = item;
+
+          // Determine if this is a new item (id created locally starts with 'i')
+          // or an existing Firestore document
+          const isNew = !id || id.startsWith('i');
+
+          const payload = { ...rest, username, ownerId: uid };
+
+          if (!isNew) {
+            // EDIT: use setDoc with merge — omit dateAdded so Firestore keeps
+            // the original Timestamp untouched. Only update if dateAdded is
+            // a plain string (safe to store) or skip it otherwise.
+            if (typeof dateAdded === 'string') {
+              payload.dateAdded = dateAdded;
+            }
+            // If dateAdded is a Timestamp or plain object, don't include it —
+            // Firestore already has the correct value, merge:true leaves it alone.
             await setDoc(doc(db, 'users', uid, 'collection', id), payload, { merge: true });
             return id;
           }
+
+          // NEW item: always use serverTimestamp()
           const ref = await addDoc(collection(db, 'users', uid, 'collection'), {
             ...payload,
             dateAdded: serverTimestamp(),
@@ -218,14 +232,30 @@ if (!FIREBASE_ENABLED) {
           }
         },
 
+        // FIX: getCommunityItems — provides a clear error message when the
+        // required composite index (dateAdded DESC across collectionGroup) is
+        // missing, and falls back gracefully instead of breaking the app.
         getCommunityItems: async () => {
-          const q = query(
-            collectionGroup(db, 'collection'),
-            orderBy('dateAdded', 'desc'),
-            limit(24)
-          );
-          const snap = await getDocs(q);
-          return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          try {
+            const q = query(
+              collectionGroup(db, 'collection'),
+              orderBy('dateAdded', 'desc'),
+              limit(24)
+            );
+            const snap = await getDocs(q);
+            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          } catch (e) {
+            if (e.code === 'failed-precondition' || e.message?.includes('index')) {
+              console.warn(
+                '[firebase] getCommunityItems: missing Firestore index.\n' +
+                'Create a composite index on collectionGroup "collection" for dateAdded DESC.\n' +
+                'Firebase Console → Firestore → Indexes → Add composite index.'
+              );
+            } else {
+              console.warn('[firebase] getCommunityItems failed:', e);
+            }
+            return [];
+          }
         },
 
         sendMessage: async (to, text) => {
@@ -247,13 +277,10 @@ if (!FIREBASE_ENABLED) {
           return onSnapshot(q, snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
         },
 
-        // Google OAuth stubs — require GoogleAuthProvider setup in Firebase Console
         googleLogin:  async () => { throw new Error('Google Sign-In requires additional Firebase configuration'); },
         googleSignup: async () => { throw new Error('Google Sign-Up requires additional Firebase configuration'); },
 
-        // ── getAllUsers — FIXED ────────────────────────────────
-        // Enumerates users/{uid} documents, then for each user runs a
-        // count query against their collection subcollection.
+        // ── getAllUsers ────────────────────────────────────────
         getAllUsers: async () => {
           try {
             const usersSnap = await getDocs(collection(db, 'users'));
